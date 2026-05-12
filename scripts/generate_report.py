@@ -911,7 +911,7 @@ def _build_late_summary(issues_output, aps_output, date_str):
 def _build_actions_summary(issues_output, aps_output, date_str):
     """
     Mensagem 2: ações pendentes agrupadas por tipo.
-    Formato: *Create AP* \\n Owner1, Owner2
+    Formato: *Create AP* \n • Owner1 — <link|code>, <link|code2>
     """
     from collections import defaultdict
 
@@ -924,25 +924,47 @@ def _build_actions_summary(issues_output, aps_output, date_str):
         'AP On Track: Complete Before Due Date',
     ]
 
-    actions = defaultdict(list)
+    # action → { owner_key: {'first': str, 'items': [(code, link), ...]} }
+    actions = defaultdict(dict)
+
     for row in list(issues_output) + list(aps_output):
         action = safe(row.get('Action', ''))
         owner  = safe(row.get('Action Owner', ''))
         if not action or action == '-' or not owner or owner == '-':
             continue
-        first = first_name_from_list(owner) or owner
-        actions[action].append(first)
+        first     = first_name_from_list(owner) or owner
+        owner_key = first.lower()
+
+        # Escolhe o link e código mais relevante para a ação
+        if 'ap_code' in row and safe(row.get('ap_code', '')) not in ('-', ''):
+            code = safe(row.get('ap_code', ''))
+            link = safe(row.get('ap_link_projac', ''))
+        else:
+            code = safe(row.get('code', ''))
+            link = safe(row.get('projac_link', ''))
+
+        entry = actions[action].setdefault(owner_key, {'first': first, 'items': []})
+        if code and code != '-':
+            item = (code, link) if link and link != '-' else (code, '')
+            if item not in entry['items']:
+                entry['items'].append(item)
 
     lines = [f':pushpin: *Ações Pendentes — {date_str}*']
     for action in ACTION_ORDER:
         if action not in actions:
             continue
-        seen, unique = set(), []
-        for o in actions[action]:
-            if o.lower() not in seen:
-                seen.add(o.lower())
-                unique.append(o)
-        lines.append(f'\n*{action}*\n{", ".join(unique)}')
+        lines.append(f'\n*{action}*')
+        for owner_data in actions[action].values():
+            name = owner_data['first']
+            items = owner_data['items']
+            if items:
+                links_str = ', '.join(
+                    f'<{lnk}|{cd}>' if lnk else cd
+                    for cd, lnk in items
+                )
+                lines.append(f'• {name} — {links_str}')
+            else:
+                lines.append(f'• {name}')
 
     return '\n'.join(lines)
 
