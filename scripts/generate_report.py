@@ -37,12 +37,16 @@ CONFIG_DIR   = os.path.join(BASE_DIR, 'data', 'config')
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'template')
 OUTPUT_DIR   = os.path.join(BASE_DIR, 'docs')       # GitHub Pages serve de /docs
 ENV_PATH     = os.path.join(BASE_DIR, '.env')
+SLACK_USER_CACHE_PATH    = os.path.join(CONFIG_DIR, 'slack_user_ids.json')
+SLACK_NAME_OVERRIDE_PATH = os.path.join(CONFIG_DIR, 'slack_user_ids_by_name.json')
 
 # ─── Configurações editáveis ───────────────────────────────────────────────────
 BCO_NAMES         = ['Ingrid Sgulmar']
 ALERT_WINDOW_DAYS = 14
 NPF_BASE_URL      = 'https://nubank.atlassian.net/browse/'
 PROJAC_BASE_URL   = 'https://backoffice.ist.nubank.world/projac/#/im/issues/'
+DASHBOARD_URL     = 'https://im-pending-actions-2093534396923660.aws.databricksapps.com/'
+SLACK_USER_CACHE  = None  # populated below — points to data/config/slack_user_ids.json
 
 # Issues e APs para excluir manualmente do report (ex: status desatualizado no Databricks)
 EXCLUDED_ISSUES = {'I012319'}
@@ -303,6 +307,9 @@ def enrich_people_map_from_org(people_map, issues_rows, ap_rows):
     Busca Business Area (level 6) e BU para TODOS os funcionários ativos do Mantiqueira.
     Constrói mapeamento por email e por unique_name para cobrir 100% dos assignees
     de issues e APs, independente de BU. Atualiza people_map in-place.
+
+    Retorna name_to_email (dict lowercase name → email) construído com dados
+    de issues (responsible/accountable) + Mantiqueira (todos funcionários ativos).
     """
     # 1. Coleta todos os nomes que aparecem no dado (issues + APs)
     all_names = set()
@@ -328,7 +335,7 @@ def enrich_people_map_from_org(people_map, issues_rows, ap_rows):
 
     missing_names = {n for n in all_names if n.lower() not in people_map}
     if not missing_names:
-        return
+        return name_to_email
 
     # 2. Busca org_level_6 de TODOS os funcionários ativos do Mantiqueira de uma vez
     #    (não filtra por email — cobre assignees de qualquer BU)
@@ -354,11 +361,12 @@ def enrich_people_map_from_org(people_map, issues_rows, ap_rows):
         )
     except Exception as e:
         print(f'  AVISO: falha ao buscar Mantiqueira: {e}')
-        return
+        return name_to_email
 
     # 3. Constrói lookup por email e por unique_name (ex: "jessica.paul")
     email_to_org    = {}
     uname_to_org    = {}
+    uname_to_email  = {}
     for row in org_rows:
         email = safe(row.get('ident__email', ''))
         uname = safe(row.get('ident__unique_name', ''))
@@ -368,6 +376,8 @@ def enrich_people_map_from_org(people_map, issues_rows, ap_rows):
             email_to_org[email.lower()] = {'bu': bu, 'ba': ba}
         if uname:
             uname_to_org[uname.lower()] = {'bu': bu, 'ba': ba}
+            if email:
+                uname_to_email[uname.lower()] = email
 
     # 4. Para cada nome faltante, tenta email direto → unique_name derivado → fallback
     found = 0
@@ -385,7 +395,17 @@ def enrich_people_map_from_org(people_map, issues_rows, ap_rows):
             people_map[name.lower()] = org
             found += 1
 
+    # 5. Para TODOS os nomes (não só missing), tenta preencher name_to_email via unique_name
+    for name in all_names:
+        if name.lower() in name_to_email:
+            continue
+        derived = name.lower().replace(' ', '.')
+        email   = uname_to_email.get(derived)
+        if email:
+            name_to_email[name.lower()] = email
+
     print(f'  -> {found}/{len(missing_names)} pessoas enriquecidas via Mantiqueira (org_level_6)')
+    return name_to_email
 
 # ─── Lógica de AP ─────────────────────────────────────────────────────────────
 
@@ -578,7 +598,7 @@ def run():
     ap_index = build_ap_index(ap_rows)
 
     # ── 3. Auto-enriquecer mapeamento de pessoas via org structure ────────────
-    enrich_people_map_from_org(people_map, issues_rows, ap_rows)
+    name_to_email = enrich_people_map_from_org(people_map, issues_rows, ap_rows) or {}
 
     # ── 3b. Calcular TTR (Time to Remediate) para issues fechadas H/VH ──────────
     ttr_data = compute_ttr(issues_rows)
@@ -593,7 +613,8 @@ def run():
         'due_date_at', 'completed_at', 'responsible_email', 'accountable_email',
         'process_journey_macroprocess__name', 'overall_risk_rating', 'origin',
         'subcategory', 'residual_risk_level', 'responsible_name', 'accountable_name',
-        'business_units', 'Action', 'Action Owner', 'Action Pending From', 'Business Area',
+        'business_units', 'Action', 'Action Owner', 'Action Owner Email',
+        'Action Pending From', 'Business Area',
     ]
 
     TERMINAL_ISSUE_STATUSES = {'Risk Accepted', 'Cancelled', 'Done', 'Completed'}
@@ -679,6 +700,7 @@ def run():
         out['NP&F+']               = npf_link
         out['Action']              = action
         out['Action Owner']        = action_owner
+        out['Action Owner Email']  = name_to_email.get(primary_owner.lower(), '')
         out['Action Pending From'] = bu
         out['Business Area']       = normalize_ba(ba)
         issues_output.append(out)
@@ -691,7 +713,8 @@ def run():
         'Issue Code', 'Type', 'issue rating', 'issue_status', 'issue_summary',
         'issue_due_date_at', 'issue_subcategory', 'ap_summary', 'ap_created_at',
         'ap_due_date_at', 'ap_business_unit', 'ap_assignee_name',
-        'Action', 'Action Owner', 'Action Pending From', 'Business Area',
+        'Action', 'Action Owner', 'Action Owner Email',
+        'Action Pending From', 'Business Area',
     ]
 
     issues_by_code = {safe(r.get('code', '')): r for r in issues_rows}
@@ -752,6 +775,7 @@ def run():
         out['issue rating']        = issue_rating
         out['Action']              = action
         out['Action Owner']        = action_owner
+        out['Action Owner Email']  = name_to_email.get(primary_owner.lower(), '')
         out['Action Pending From'] = bu
         out['Business Area']       = normalize_ba(ba)
         aps_output.append(out)
@@ -838,9 +862,12 @@ def _write_steerco_data(issues_csv, aps_csv, ttr_data, generated_at):
         json.dump(data, f, ensure_ascii=False)
     print(f'  steerco/public/data.json gerado: {len(json.dumps(data).encode()) // 1024} KB')
 
-def _slack_post(token, channel, text):
-    """Posta uma mensagem de texto no canal Slack."""
-    payload = json.dumps({'channel': channel, 'text': text}).encode()
+def _slack_post(token, channel, text, thread_ts=None):
+    """Posta uma mensagem de texto no canal Slack (opcionalmente em thread)."""
+    body = {'channel': channel, 'text': text}
+    if thread_ts:
+        body['thread_ts'] = thread_ts
+    payload = json.dumps(body).encode()
     req = urllib.request.Request('https://slack.com/api/chat.postMessage',
                                  data=payload, method='POST')
     req.add_header('Authorization', f'Bearer {token}')
@@ -849,93 +876,152 @@ def _slack_post(token, channel, text):
         return json.loads(r.read())
 
 
-def _build_late_summary(issues_output, aps_output, date_str):
-    """
-    Mensagem 1: contagem de itens late por Business Area.
-    Formato: X Issues Late · BA (link1, link2)
-    """
-    from collections import defaultdict
+def _load_slack_user_cache():
+    if not os.path.exists(SLACK_USER_CACHE_PATH):
+        return {}
+    try:
+        with open(SLACK_USER_CACHE_PATH, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-    late_issues    = defaultdict(list)
-    late_potential = defaultdict(list)
-    late_aps       = defaultdict(list)
+
+def _save_slack_user_cache(cache):
+    os.makedirs(os.path.dirname(SLACK_USER_CACHE_PATH), exist_ok=True)
+    with open(SLACK_USER_CACHE_PATH, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _slack_lookup_by_email(token, email):
+    """Busca user_id do Slack pelo email. Retorna '' se não achou."""
+    import urllib.parse
+    url = 'https://slack.com/api/users.lookupByEmail?' + urllib.parse.urlencode({'email': email})
+    req = urllib.request.Request(url, method='GET')
+    req.add_header('Authorization', f'Bearer {token}')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read())
+    except Exception:
+        return ''
+    if resp.get('ok'):
+        return safe(resp.get('user', {}).get('id', ''))
+    return ''
+
+
+def resolve_slack_user_ids(emails, token):
+    """Resolve Slack user IDs para um conjunto de emails. Usa cache em data/config/slack_user_ids.json."""
+    cache  = _load_slack_user_cache()
+    unique = {e.lower() for e in emails if e}
+    missing = sorted(unique - set(cache.keys()))
+    if not missing:
+        return cache
+    if not token:
+        return cache
+    print(f'[generate_report] Resolvendo {len(missing)} novo(s) Slack user ID(s)...')
+    new = 0
+    for email in missing:
+        uid = _slack_lookup_by_email(token, email)
+        cache[email] = uid  # '' marca como "buscado e não achou" pra não tentar de novo
+        if uid:
+            new += 1
+    _save_slack_user_cache(cache)
+    print(f'  -> {new}/{len(missing)} resolvidos (cache salvo)')
+    return cache
+
+
+def _load_slack_name_overrides():
+    if not os.path.exists(SLACK_NAME_OVERRIDE_PATH):
+        return {}
+    try:
+        with open(SLACK_NAME_OVERRIDE_PATH, encoding='utf-8') as f:
+            data = json.load(f)
+        # Remove campos de comentário (chaves começando com _)
+        return {k.lower(): v for k, v in data.items() if v and not k.startswith('_')}
+    except Exception:
+        return {}
+
+
+def _slack_mention(name, email, slack_cache, name_overrides=None):
+    """Retorna <@USER_ID|Nome> se temos user_id; tenta email, depois nome (override). Senão só o nome."""
+    if email and slack_cache.get(email.lower()):
+        return f'<@{slack_cache[email.lower()]}|{name}>'
+    if name_overrides and name and name_overrides.get(name.lower()):
+        return f'<@{name_overrides[name.lower()]}|{name}>'
+    return name
+
+
+def _build_late_section(issues_output, aps_output, slack_cache, name_overrides=None):
+    """
+    Seção 1 do reply: itens já late (AP Late: Replan/Complete AP).
+    Formato simples, uma linha por item com @mention do owner.
+    """
+    late_items = []  # [(label, code, link, name, email), ...]
 
     for row in issues_output:
-        if row.get('Action') == 'AP Late: Replan/Complete AP':
-            ba    = row.get('Business Area', 'TBD')
-            code  = safe(row.get('code', ''))
-            link  = safe(row.get('projac_link', ''))
-            entry = f'<{link}|{code}>' if link else code
-            if row.get('Type') == 'Potential Issue':
-                late_potential[ba].append(entry)
-            else:
-                late_issues[ba].append(entry)
+        if row.get('Action') != 'AP Late: Replan/Complete AP':
+            continue
+        code  = safe(row.get('code', ''))
+        link  = safe(row.get('projac_link', ''))
+        label = 'Potential Issue' if row.get('Type') == 'Potential Issue' else 'Issue'
+        owner = safe(row.get('Action Owner', ''))
+        email = safe(row.get('Action Owner Email', ''))
+        full  = first_name_from_list(owner) or owner
+        late_items.append((label, code, link, full, email))
 
     for row in aps_output:
-        if row.get('Action') == 'AP Late: Replan/Complete AP':
-            ba    = row.get('Business Area', 'TBD')
-            code  = safe(row.get('ap_code', ''))
-            link  = safe(row.get('ap_link_projac', ''))
-            entry = f'<{link}|{code}>' if link else code
-            late_aps[ba].append(entry)
+        if row.get('Action') != 'AP Late: Replan/Complete AP':
+            continue
+        code  = safe(row.get('ap_code', ''))
+        link  = safe(row.get('ap_link_projac', ''))
+        owner = safe(row.get('Action Owner', ''))
+        email = safe(row.get('Action Owner Email', ''))
+        full  = first_name_from_list(owner) or owner
+        late_items.append(('AP', code, link, full, email))
 
-    lines = [f':red_circle: *Issues & APs Late — {date_str}*']
+    lines = ['*Late Issues & APs —*']
+    if not late_items:
+        lines.append('No late items this week! :clap:')
+        return '\n'.join(lines)
 
-    if late_issues:
-        lines.append('\n*Issues Late*')
-        for ba in sorted(late_issues):
-            items = late_issues[ba]
-            n = len(items)
-            lines.append(f'{n} Issue{"s" if n > 1 else ""} Late · {ba} ({", ".join(items)})')
-
-    if late_potential:
-        lines.append('\n*Potential Issues Late*')
-        for ba in sorted(late_potential):
-            items = late_potential[ba]
-            n = len(items)
-            lines.append(f'{n} Potential Issue{"s" if n > 1 else ""} Late · {ba} ({", ".join(items)})')
-
-    if late_aps:
-        lines.append('\n*Action Plans Late*')
-        for ba in sorted(late_aps):
-            items = late_aps[ba]
-            n = len(items)
-            lines.append(f'{n} AP{"s" if n > 1 else ""} Late · {ba} ({", ".join(items)})')
-
-    if not late_issues and not late_potential and not late_aps:
-        lines.append(':white_check_mark: Nenhum item late esta semana!')
-
+    for label, code, link, name, email in late_items:
+        item_link = f'<{link}|{code}>' if link else code
+        mention   = _slack_mention(name, email, slack_cache, name_overrides) if name else ''
+        suffix    = f' — {mention}' if mention else ''
+        lines.append(f'• {label} {item_link}{suffix}')
     return '\n'.join(lines)
 
 
-def _build_actions_summary(issues_output, aps_output, date_str):
+def _build_action_sections(issues_output, aps_output, slack_cache, name_overrides=None):
     """
-    Mensagem 2: ações pendentes agrupadas por tipo.
-    Formato: *Create AP* \n • Owner1 — <link|code>, <link|code2>
+    Retorna lista de seções de ações pendentes (uma por tipo de ação),
+    cada uma já formatada como bloco de texto pronto para postar.
+    Retorna [] se não houver nenhuma ação pendente.
     """
     from collections import defaultdict
 
+    # "AP On Track: Complete Before Due Date" é intencionalmente omitido do post
+    # semanal — muito ruidoso, não acionável. Continua disponível no dashboard.
     ACTION_ORDER = [
-        'AP Late: Replan/Complete AP',
         'Create AP',
         'Complete AP Pending Approval',
         'Complete AP Pending Validation',
         'AP will overdue < 2 weeks',
-        'AP On Track: Complete Before Due Date',
     ]
 
-    # action → { owner_key: {'first': str, 'items': [(code, link), ...]} }
+    # action → { owner_key: {'name': str, 'email': str, 'items': [(code, link), ...]} }
     actions = defaultdict(dict)
 
     for row in list(issues_output) + list(aps_output):
         action = safe(row.get('Action', ''))
         owner  = safe(row.get('Action Owner', ''))
+        email  = safe(row.get('Action Owner Email', ''))
         if not action or action == '-' or not owner or owner == '-':
             continue
-        first     = first_name_from_list(owner) or owner
-        owner_key = first.lower()
+        if action not in ACTION_ORDER:
+            continue
+        full      = first_name_from_list(owner) or owner
+        owner_key = full.lower()
 
-        # Escolhe o link e código mais relevante para a ação
         if 'ap_code' in row and safe(row.get('ap_code', '')) not in ('-', ''):
             code = safe(row.get('ap_code', ''))
             link = safe(row.get('ap_link_projac', ''))
@@ -943,30 +1029,40 @@ def _build_actions_summary(issues_output, aps_output, date_str):
             code = safe(row.get('code', ''))
             link = safe(row.get('projac_link', ''))
 
-        entry = actions[action].setdefault(owner_key, {'first': first, 'items': []})
+        entry = actions[action].setdefault(owner_key, {'name': full, 'email': email, 'items': []})
         if code and code != '-':
             item = (code, link) if link and link != '-' else (code, '')
             if item not in entry['items']:
                 entry['items'].append(item)
 
-    lines = [f':pushpin: *Ações Pendentes — {date_str}*']
+    sections = []
     for action in ACTION_ORDER:
         if action not in actions:
             continue
-        lines.append(f'\n*{action}*')
+        lines = [f'*{action}*']
         for owner_data in actions[action].values():
-            name = owner_data['first']
-            items = owner_data['items']
+            mention = _slack_mention(owner_data['name'], owner_data['email'], slack_cache, name_overrides)
+            items   = owner_data['items']
             if items:
                 links_str = ', '.join(
                     f'<{lnk}|{cd}>' if lnk else cd
                     for cd, lnk in items
                 )
-                lines.append(f'• {name} — {links_str}')
+                lines.append(f'• {mention} — {links_str}')
             else:
-                lines.append(f'• {name}')
+                lines.append(f'• {mention}')
+        sections.append('\n'.join(lines))
+    return sections
 
-    return '\n'.join(lines)
+
+def _collect_action_owner_emails(issues_output, aps_output):
+    """Coleta todos os emails distintos de Action Owner para resolver Slack IDs em batch."""
+    emails = set()
+    for row in list(issues_output) + list(aps_output):
+        e = safe(row.get('Action Owner Email', ''))
+        if e:
+            emails.add(e.lower())
+    return emails
 
 
 def send_to_slack(html_path, generated_at, issues_output=None, aps_output=None):
@@ -977,86 +1073,51 @@ def send_to_slack(html_path, generated_at, issues_output=None, aps_output=None):
         print('  AVISO: SLACK_TOKEN ou SLACK_CHANNEL não configurados. Pulando envio.')
         return
 
-    filename = os.path.basename(html_path)
-    with open(html_path, 'rb') as f:
-        file_bytes = f.read()
-
-    # Passo 1: obter URL de upload (form-encoded)
-    import urllib.parse
-    payload1 = urllib.parse.urlencode({
-        'filename': filename,
-        'length':   len(file_bytes),
-    }).encode()
-    req1 = urllib.request.Request(
-        'https://slack.com/api/files.getUploadURLExternal',
-        data=payload1, method='POST',
-    )
-    req1.add_header('Authorization', f'Bearer {token}')
-    req1.add_header('Content-Type', 'application/x-www-form-urlencoded')
-    with urllib.request.urlopen(req1, timeout=30) as r:
-        resp1 = json.loads(r.read())
-    if not resp1.get('ok'):
-        print(f'  ERRO Slack getUploadURL: {resp1.get("error")}')
+    if issues_output is None or aps_output is None:
+        print('  AVISO: issues_output/aps_output vazios. Pulando envio.')
         return
 
-    upload_url = resp1['upload_url']
-    file_id    = resp1['file_id']
+    # 1. Resolve Slack user IDs em batch (com cache local) + overrides por nome
+    emails          = _collect_action_owner_emails(issues_output, aps_output)
+    slack_cache     = resolve_slack_user_ids(emails, token)
+    name_overrides  = _load_slack_name_overrides()
+    if name_overrides:
+        print(f'  -> {len(name_overrides)} override(s) por nome carregado(s)')
 
-    # Passo 2: enviar conteúdo do arquivo
-    req2 = urllib.request.Request(upload_url, data=file_bytes, method='POST')
-    req2.add_header('Content-Type', 'text/html')
-    with urllib.request.urlopen(req2, timeout=60) as r:
-        pass  # resposta 200 OK sem corpo
+    # 2. Monta título: "Issues/Action Plans As of - Jun 2nd"
+    try:
+        gen_dt = datetime.strptime(generated_at, '%Y-%m-%d %H:%M')
+    except ValueError:
+        gen_dt = datetime.now()
 
-    # Passo 3: completar upload (sem canal — obtém permalink)
-    payload3 = json.dumps({'files': [{'id': file_id}]}).encode()
-    req3 = urllib.request.Request(
-        'https://slack.com/api/files.completeUploadExternal',
-        data=payload3, method='POST',
-    )
-    req3.add_header('Authorization', f'Bearer {token}')
-    req3.add_header('Content-Type', 'application/json')
-    with urllib.request.urlopen(req3, timeout=30) as r:
-        resp3 = json.loads(r.read())
-    if not resp3.get('ok'):
-        print(f'  ERRO Slack completeUpload: {resp3.get("error")}')
+    def _day_suffix(d):
+        if 10 <= d % 100 <= 20:
+            return 'th'
+        return {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')
+
+    title_date = gen_dt.strftime('%b ') + f'{gen_dt.day}{_day_suffix(gen_dt.day)}'
+    parent_text = f'`Issues/Action Plans As of - {title_date}`'
+
+    # 3. Posta parent message
+    resp_parent = _slack_post(token, channel, parent_text)
+    if not resp_parent.get('ok'):
+        print(f'  ERRO Slack (parent): {resp_parent.get("error")}')
         return
+    thread_ts = resp_parent.get('ts')
+    print(f'  ✓ Parent enviado (canal {channel}, ts={thread_ts})')
 
-    permalink = resp3['files'][0].get('permalink', '')
+    # 4. Posta uma reply por seção (evita quebra automática em mensagens grandes)
+    late_section    = _build_late_section(issues_output, aps_output, slack_cache, name_overrides)
+    action_sections = _build_action_sections(issues_output, aps_output, slack_cache, name_overrides)
 
-    # Passo 4: posta link no canal
-    payload4 = json.dumps({
-        'channel': channel,
-        'text': f':bar_chart: *Issue Management Dashboard* — {generated_at}\n{permalink}',
-    }).encode()
-    req4 = urllib.request.Request(
-        'https://slack.com/api/chat.postMessage',
-        data=payload4, method='POST',
-    )
-    req4.add_header('Authorization', f'Bearer {token}')
-    req4.add_header('Content-Type', 'application/json')
-    with urllib.request.urlopen(req4, timeout=15) as r:
-        resp4 = json.loads(r.read())
-    if resp4.get('ok'):
-        print(f'  ✓ Dashboard enviado para o Slack (canal {channel})')
-    else:
-        print(f'  ERRO Slack postMessage: {resp4.get("error")}')
+    replies = [late_section] + action_sections + [f'<{DASHBOARD_URL}|Dashboard Issue>']
 
-    # Mensagem 1: itens late por Business Area
-    if issues_output is not None and aps_output is not None:
-        date_str = datetime.strptime(generated_at, '%Y-%m-%d %H:%M').strftime('%d/%m/%Y')
-        resp_late = _slack_post(token, channel, _build_late_summary(issues_output, aps_output, date_str))
-        if resp_late.get('ok'):
-            print(f'  ✓ Resumo de itens late enviado')
+    for idx, text in enumerate(replies, 1):
+        resp = _slack_post(token, channel, text, thread_ts=thread_ts)
+        if resp.get('ok'):
+            print(f'  ✓ Reply {idx}/{len(replies)} enviado')
         else:
-            print(f'  ERRO Slack (late summary): {resp_late.get("error")}')
-
-        # Mensagem 2: ações pendentes
-        resp_actions = _slack_post(token, channel, _build_actions_summary(issues_output, aps_output, date_str))
-        if resp_actions.get('ok'):
-            print(f'  ✓ Resumo de ações pendentes enviado')
-        else:
-            print(f'  ERRO Slack (actions summary): {resp_actions.get("error")}')
+            print(f'  ERRO Slack (reply {idx}): {resp.get("error")}')
 
 if __name__ == '__main__':
     run()

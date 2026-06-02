@@ -1,0 +1,9 @@
+{
+  "_comment": "Override manual: nome lowercase -> Slack user_id. Usado quando o script nao consegue resolver email via Mantiqueira (ex: pessoa MX, display name != email).",
+  "bernardo calle": "U09DS97CL30",
+  "michel sterenfeld": "W013E2D7KMW",
+  "maiza carvalho": "W0129HZJWDV",
+  "gabriel andrade": "U0AEMSU2X61",
+  "eduardo chapa": "U0717DJJC76",
+  "fernanda patrao": "W012W4K4PMJ"
+}
