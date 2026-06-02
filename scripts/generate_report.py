@@ -942,52 +942,92 @@ def _load_slack_name_overrides():
 
 
 def _slack_mention(name, email, slack_cache, name_overrides=None):
-    """Retorna <@USER_ID|Nome> se temos user_id; tenta email, depois nome (override). Senão só o nome."""
+    """Retorna <@USER_ID> (formato canônico do Slack, renderiza como @Nome) se temos user_id.
+    Tenta email primeiro, depois nome (override). Fallback: nome em texto puro."""
     if email and slack_cache.get(email.lower()):
-        return f'<@{slack_cache[email.lower()]}|{name}>'
+        return f'<@{slack_cache[email.lower()]}>'
     if name_overrides and name and name_overrides.get(name.lower()):
-        return f'<@{name_overrides[name.lower()]}|{name}>'
+        return f'<@{name_overrides[name.lower()]}>'
     return name
 
 
 def _build_late_section(issues_output, aps_output, slack_cache, name_overrides=None):
     """
-    Seção 1 do reply: itens já late (AP Late: Replan/Complete AP).
-    Formato simples, uma linha por item com @mention do owner.
+    Seção 1 do reply: itens já late. Agrupa por (issue_code, owner) e
+    separa em 2 blocos: Potential Issues + suas APs vs Issues + suas APs.
+    Formato: • @Owner — <link|ISSUE>, <link|AP1>, <link|AP2>
     """
-    late_items = []  # [(label, code, link, name, email), ...]
+    from collections import OrderedDict
+
+    # (issue_code, owner_key) -> {'name', 'email', 'issue': (code, link)|None, 'aps': [(code, link), ...]}
+    potential = OrderedDict()
+    regular   = OrderedDict()
+
+    def _ensure(target, key, name, email):
+        if key not in target:
+            target[key] = {'name': name, 'email': email, 'issue': None, 'aps': []}
+        elif not target[key]['name']:
+            target[key]['name']  = name
+            target[key]['email'] = email
+        return target[key]
 
     for row in issues_output:
         if row.get('Action') != 'AP Late: Replan/Complete AP':
             continue
         code  = safe(row.get('code', ''))
         link  = safe(row.get('projac_link', ''))
-        label = 'Potential Issue' if row.get('Type') == 'Potential Issue' else 'Issue'
         owner = safe(row.get('Action Owner', ''))
         email = safe(row.get('Action Owner Email', ''))
         full  = first_name_from_list(owner) or owner
-        late_items.append((label, code, link, full, email))
+        target = potential if row.get('Type') == 'Potential Issue' else regular
+        entry  = _ensure(target, (code, full.lower()), full, email)
+        entry['issue'] = (code, link)
 
     for row in aps_output:
         if row.get('Action') != 'AP Late: Replan/Complete AP':
             continue
-        code  = safe(row.get('ap_code', ''))
-        link  = safe(row.get('ap_link_projac', ''))
-        owner = safe(row.get('Action Owner', ''))
-        email = safe(row.get('Action Owner Email', ''))
-        full  = first_name_from_list(owner) or owner
-        late_items.append(('AP', code, link, full, email))
+        ap_code    = safe(row.get('ap_code', ''))
+        ap_link    = safe(row.get('ap_link_projac', ''))
+        issue_code = safe(row.get('Issue Code', ''))
+        owner      = safe(row.get('Action Owner', ''))
+        email      = safe(row.get('Action Owner Email', ''))
+        full       = first_name_from_list(owner) or owner
+        target = potential if row.get('Type') == 'Potential Issue' else regular
+        entry  = _ensure(target, (issue_code, full.lower()), full, email)
+        entry['aps'].append((ap_code, ap_link))
 
     lines = ['*Late Issues & APs —*']
-    if not late_items:
+
+    if not potential and not regular:
         lines.append('No late items this week! :clap:')
         return '\n'.join(lines)
 
-    for label, code, link, name, email in late_items:
-        item_link = f'<{link}|{code}>' if link else code
-        mention   = _slack_mention(name, email, slack_cache, name_overrides) if name else ''
-        suffix    = f' — {mention}' if mention else ''
-        lines.append(f'• {label} {item_link}{suffix}')
+    def _render_group(target):
+        out = []
+        for entry in target.values():
+            items = []
+            if entry['issue']:
+                code, link = entry['issue']
+                items.append(f'<{link}|{code}>' if link else code)
+            for ap_code, ap_link in entry['aps']:
+                items.append(f'<{ap_link}|{ap_code}>' if ap_link else ap_code)
+            if not items:
+                continue
+            mention = _slack_mention(entry['name'], entry['email'], slack_cache, name_overrides) if entry['name'] else ''
+            prefix  = f'{mention} — ' if mention else ''
+            out.append(f'• {prefix}{", ".join(items)}')
+        return out
+
+    if potential:
+        lines.append('')
+        lines.append('*Potential Issues + APs*')
+        lines.extend(_render_group(potential))
+
+    if regular:
+        lines.append('')
+        lines.append('*Issues + APs*')
+        lines.extend(_render_group(regular))
+
     return '\n'.join(lines)
 
 
@@ -1007,14 +1047,17 @@ def _build_action_sections(issues_output, aps_output, slack_cache, name_override
         'Complete AP Pending Validation',
         'AP will overdue < 2 weeks',
     ]
+    # Actions que devem ser sub-divididas por Type (Potential Issue vs Issue)
+    SPLIT_BY_TYPE = {'AP will overdue < 2 weeks'}
 
-    # action → { owner_key: {'name': str, 'email': str, 'items': [(code, link), ...]} }
+    # action → { owner_key: {'name', 'email', 'items': [(code, link, type), ...]} }
     actions = defaultdict(dict)
 
     for row in list(issues_output) + list(aps_output):
         action = safe(row.get('Action', ''))
         owner  = safe(row.get('Action Owner', ''))
         email  = safe(row.get('Action Owner Email', ''))
+        type_  = safe(row.get('Type', '')) or 'Issue'
         if not action or action == '-' or not owner or owner == '-':
             continue
         if action not in ACTION_ORDER:
@@ -1031,27 +1074,56 @@ def _build_action_sections(issues_output, aps_output, slack_cache, name_override
 
         entry = actions[action].setdefault(owner_key, {'name': full, 'email': email, 'items': []})
         if code and code != '-':
-            item = (code, link) if link and link != '-' else (code, '')
+            item = (code, link, type_)
             if item not in entry['items']:
                 entry['items'].append(item)
+
+    def _format_owner_line(owner_data, items_filter=None):
+        mention = _slack_mention(owner_data['name'], owner_data['email'], slack_cache, name_overrides)
+        items = owner_data['items'] if items_filter is None else [it for it in owner_data['items'] if items_filter(it)]
+        if not items:
+            return None
+        links_str = ', '.join(
+            f'<{lnk}|{cd}>' if lnk else cd
+            for cd, lnk, _ in items
+        )
+        return f'• {mention} — {links_str}'
 
     sections = []
     for action in ACTION_ORDER:
         if action not in actions:
             continue
+
+        if action not in SPLIT_BY_TYPE:
+            lines = [f'*{action}*']
+            for owner_data in actions[action].values():
+                line = _format_owner_line(owner_data)
+                if line:
+                    lines.append(line)
+            sections.append('\n'.join(lines))
+            continue
+
+        # SPLIT_BY_TYPE: gera sub-blocos Potential / Issue
         lines = [f'*{action}*']
+        potential_lines = []
+        regular_lines   = []
         for owner_data in actions[action].values():
-            mention = _slack_mention(owner_data['name'], owner_data['email'], slack_cache, name_overrides)
-            items   = owner_data['items']
-            if items:
-                links_str = ', '.join(
-                    f'<{lnk}|{cd}>' if lnk else cd
-                    for cd, lnk in items
-                )
-                lines.append(f'• {mention} — {links_str}')
-            else:
-                lines.append(f'• {mention}')
-        sections.append('\n'.join(lines))
+            p_line = _format_owner_line(owner_data, lambda it: it[2] == 'Potential Issue')
+            r_line = _format_owner_line(owner_data, lambda it: it[2] != 'Potential Issue')
+            if p_line: potential_lines.append(p_line)
+            if r_line: regular_lines.append(r_line)
+
+        if potential_lines:
+            lines.append('_Potential Issues_')
+            lines.extend(potential_lines)
+        if regular_lines:
+            if potential_lines:
+                lines.append('')
+            lines.append('_Issues_')
+            lines.extend(regular_lines)
+
+        if potential_lines or regular_lines:
+            sections.append('\n'.join(lines))
     return sections
 
 
