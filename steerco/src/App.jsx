@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Header from './components/Header'
 import OverviewTab from './components/OverviewTab'
 import DetailsTab from './components/DetailsTab'
+import TrendTab from './components/TrendTab'
 
 function parseCSV(text) {
   if (!text?.trim()) return []
@@ -71,12 +72,14 @@ export default function App() {
         <button style={TAB_STYLE(tab==='details')} onClick={() => setTab('details')}>
           📋 Detail
         </button>
+        <button style={TAB_STYLE(tab==='trend')} onClick={() => setTab('trend')}>
+          📈 Self-Identified
+        </button>
       </div>
 
-      {tab === 'overview'
-        ? <OverviewTab issues={issues} aps={aps} />
-        : <DetailsTab  issues={issues} aps={aps} />
-      }
+      {tab === 'overview' && <OverviewTab issues={issues} aps={aps} />}
+      {tab === 'details'  && <DetailsTab  issues={issues} aps={aps} />}
+      {tab === 'trend'    && <TrendTab    issues={issues} />}
     </div>
   )
 }

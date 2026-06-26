@@ -69,7 +69,7 @@ function PresentationNotes({ noteKey }) {
   )
 }
 
-function IssueCard({ issue, borderColor }) {
+export function IssueCard({ issue, borderColor }) {
   const npfKey = issue['NP&F+'] && issue['NP&F+'] !== '-' ? issue['NP&F+'] : null
 
   return (
