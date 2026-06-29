@@ -70,7 +70,8 @@ function PresentationNotes({ noteKey }) {
 }
 
 export function IssueCard({ issue, borderColor }) {
-  const npfKey = issue['NP&F+'] && issue['NP&F+'] !== '-' ? issue['NP&F+'] : null
+  const npfUrl = issue['NP&F+'] && issue['NP&F+'] !== '-' ? issue['NP&F+'] : null
+  const npfRef = npfUrl ? npfUrl.split('/').pop() : null
 
   return (
     <div style={{
@@ -85,13 +86,13 @@ export function IssueCard({ issue, borderColor }) {
             style={{ color: '#8A05BE', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
             {issue.code}
           </a>
-          {npfKey && (
-            <a href={npfKey} target="_blank" rel="noreferrer" style={{
+          {npfUrl && (
+            <a href={npfUrl} target="_blank" rel="noreferrer" title="NP&F+ assessment reference" style={{
               display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6,
               background: '#FF6B0015', color: '#B84500', border: '1px solid #FF6B0044',
               borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, textDecoration: 'none',
             }}>
-              🔗 {issue.key || 'NP&F+ Jira'}
+              🔗 {npfRef || 'NP&F+'}
             </a>
           )}
         </div>
