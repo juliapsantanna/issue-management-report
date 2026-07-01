@@ -319,14 +319,22 @@ export default function OverviewTab({ issues, aps }) {
   const statusCount = issuesBA.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc }, {})
   const donutData   = Object.entries(statusCount).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
 
-  // Rating (cross-filtered)
-  const ratingCount = filteredIssues.reduce((acc, i) => { acc[i.overall_risk_rating] = (acc[i.overall_risk_rating] || 0) + 1; return acc }, {})
-  const ratingData  = [
-    { name: 'Very High', value: ratingCount['Very High'] || 0, color: '#9B0020' },
-    { name: 'High',      value: ratingCount['High']      || 0, color: '#E0002A' },
-    { name: 'Medium',    value: ratingCount['Medium']    || 0, color: '#D48000' },
-    { name: 'Low',       value: ratingCount['Low']       || 0, color: '#1A6FCC' },
-  ]
+  // Rating (cross-filtered) — split confirmed Issues vs Potential Issues so a
+  // scary rating (e.g. 1 Very High) doesn't alarm when it's only a potential issue
+  const ratingData = [
+    { name: 'Very High', color: '#9B0020' },
+    { name: 'High',      color: '#E0002A' },
+    { name: 'Medium',    color: '#D48000' },
+    { name: 'Low',       color: '#1A6FCC' },
+  ].map(({ name, color }) => {
+    const rows = filteredIssues.filter(i => i.overall_risk_rating === name)
+    return {
+      name, color,
+      value:     rows.length,
+      confirmed: rows.filter(i => i.Type === 'Issue').length,
+      potential: rows.filter(i => i.Type === 'Potential Issue').length,
+    }
+  })
 
   const [chartDrilldown, setChartDrilldown] = useState(null) // { ba, type, items }
 
@@ -351,6 +359,16 @@ export default function OverviewTab({ issues, aps }) {
       prev?.ba === ba && prev?.type === chartType ? null : { ba, type: chartType, items: rows }
     )
   }, [issues, aps])
+
+  const handleRatingClick = useCallback((rating, color) => {
+    const rows = filteredIssues
+      .filter(i => i.overall_risk_rating === rating)
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type }))
+      .sort((a, b) => (a.type === 'Potential Issue' ? 1 : 0) - (b.type === 'Potential Issue' ? 1 : 0)) // confirmed first
+    setChartDrilldown(prev =>
+      prev?.rating === rating ? null : { rating, title: `${rating} — Risk Rating`, titleColor: color, items: rows }
+    )
+  }, [filteredIssues])
 
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
@@ -422,22 +440,51 @@ export default function OverviewTab({ issues, aps }) {
           }
         </ChartCard>
 
-        <ChartCard title="Issues by Risk Rating" subtitle="Filtered by active status & BA">
+        <ChartCard title="Issues by Risk Rating" subtitle="Filtered by active status & BA · Click a rating to see the issues">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 0' }}>
-            {ratingData.map(({ name, value, color }) => {
-              const pct = filteredIssues.length ? Math.round((value / filteredIssues.length) * 100) : 0
+            {ratingData.map(({ name, value, color, confirmed, potential }) => {
+              const total = filteredIssues.length
+              const pct          = total ? Math.round((value / total) * 100) : 0
+              const confirmedPct = total ? (confirmed / total) * 100 : 0
+              const potentialPct = total ? (potential / total) * 100 : 0
+              const isOpen = chartDrilldown?.rating === name
+              const disabled = value === 0
+              const stripe = `repeating-linear-gradient(45deg, ${color} 0, ${color} 2px, #F0EDF5 2px, #F0EDF5 5px)`
               return (
-                <div key={name}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
-                    <span style={{ fontWeight: 600, color }}>{name}</span>
-                    <span style={{ color: '#6B6B80' }}>{value} ({pct}%)</span>
+                <button key={name} onClick={() => !disabled && handleRatingClick(name, color)}
+                  disabled={disabled}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', background: isOpen ? color + '0D' : 'none',
+                    border: isOpen ? `1.5px solid ${color}44` : '1.5px solid transparent', borderRadius: 8,
+                    padding: '6px 8px', margin: '-6px -8px', cursor: disabled ? 'default' : 'pointer',
+                    transition: 'all 0.15s', font: 'inherit' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 13, marginBottom: 5, gap: 8 }}>
+                    <span style={{ fontWeight: 600, color, textDecoration: disabled ? 'none' : 'underline dotted', textUnderlineOffset: 3 }}>{name}</span>
+                    <span style={{ color: '#6B6B80', textAlign: 'right' }}>
+                      {value} ({pct}%)
+                      {potential > 0 && (
+                        <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600 }}>
+                          · <span style={{ color: '#1A6FCC' }}>{confirmed} issue{confirmed !== 1 ? 's' : ''}</span>
+                          {' + '}<span style={{ color: '#D48000' }}>{potential} pot.</span>
+                        </span>
+                      )}
+                    </span>
                   </div>
-                  <div style={{ height: 10, background: '#F0EDF5', borderRadius: 5, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 5, transition: 'width 0.6s ease' }} />
+                  <div style={{ height: 10, background: '#F0EDF5', borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
+                    <div style={{ height: '100%', width: `${confirmedPct}%`, background: color, transition: 'width 0.6s ease' }} />
+                    <div style={{ height: '100%', width: `${potentialPct}%`, backgroundImage: stripe, transition: 'width 0.6s ease' }} />
                   </div>
-                </div>
+                </button>
               )
             })}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10.5, color: '#6B6B80', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 16, height: 8, borderRadius: 2, background: '#6B6B80', display: 'inline-block' }} /> Confirmed issue
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 16, height: 8, borderRadius: 2, display: 'inline-block',
+                backgroundImage: 'repeating-linear-gradient(45deg, #6B6B80 0, #6B6B80 2px, #F0EDF5 2px, #F0EDF5 5px)' }} /> Potential issue
+            </span>
           </div>
         </ChartCard>
       </div>
@@ -472,12 +519,20 @@ export default function OverviewTab({ issues, aps }) {
           boxShadow: '0 1px 6px rgba(0,0,0,0.07)', border: '1.5px solid #8A05BE44' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>
-                {chartDrilldown.type === 'AP' ? 'Action Plans' : chartDrilldown.type + 's'} — {chartDrilldown.ba}
+              <span style={{ fontSize: 15, fontWeight: 700, color: chartDrilldown.titleColor || '#1A1A2E' }}>
+                {chartDrilldown.title
+                  ? chartDrilldown.title
+                  : `${chartDrilldown.type === 'AP' ? 'Action Plans' : chartDrilldown.type + 's'} — ${chartDrilldown.ba}`}
               </span>
               <span style={{ marginLeft: 10, fontSize: 12, color: '#6B6B80' }}>
                 {chartDrilldown.items.length} item{chartDrilldown.items.length !== 1 ? 's' : ''}
               </span>
+              {chartDrilldown.rating && (
+                <span style={{ marginLeft: 8, fontSize: 12, color: '#6B6B80' }}>
+                  · <b style={{ color: '#1A6FCC' }}>{chartDrilldown.items.filter(x => x.type === 'Issue').length}</b> confirmed
+                  {' · '}<b style={{ color: '#D48000' }}>{chartDrilldown.items.filter(x => x.type === 'Potential Issue').length}</b> potential
+                </span>
+              )}
             </div>
             <button onClick={() => setChartDrilldown(null)} style={{ background: 'none', border: 'none',
               fontSize: 20, cursor: 'pointer', color: '#6B6B80', lineHeight: 1 }}>×</button>
@@ -509,6 +564,16 @@ export default function OverviewTab({ issues, aps }) {
                       <div style={{ flex: 1, fontSize: 13, color: '#1A1A2E', minWidth: 200 }}>{item.summary}</div>
                       {/* Badges */}
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {item.type && (() => {
+                          const tColor = item.type === 'Potential Issue' ? '#D48000' : '#1A6FCC'
+                          return (
+                            <span style={{ background: tColor + '15', color: tColor,
+                              border: `1px solid ${tColor}44`, borderRadius: 6,
+                              padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>
+                              {item.type === 'Potential Issue' ? '⚠️ Potential' : '🔴 Issue'}
+                            </span>
+                          )
+                        })()}
                         {item.status && (
                           <span style={{ background: statusColor + '15', color: statusColor,
                             border: `1px solid ${statusColor}44`, borderRadius: 6,
