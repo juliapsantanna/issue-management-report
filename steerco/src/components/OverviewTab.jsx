@@ -366,7 +366,7 @@ export default function OverviewTab({ issues, aps }) {
     if (chartType === 'Issue' || chartType === 'Potential Issue') {
       rows = issues
         .filter(i => normalizeBA(i['Business Area']) === ba && i.Type === chartType)
-        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, dueDate: i.due_date_at }))
+        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, dueDate: i.due_date_at, npf: i['NP&F+'] }))
     } else {
       rows = aps
         .filter(a => normalizeBA(a['Business Area']) === ba)
@@ -381,7 +381,7 @@ export default function OverviewTab({ issues, aps }) {
   const handleRatingClick = useCallback((rating, color) => {
     const rows = filteredIssues
       .filter(i => i.overall_risk_rating === rating)
-      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at }))
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
     setChartDrilldown(prev =>
       prev?.rating === rating ? null : { rating, title: `${rating} — Risk Rating`, titleColor: color, items: rows }
     )
@@ -613,6 +613,15 @@ export default function OverviewTab({ issues, aps }) {
                             </span>
                           )
                         })()}
+                        {item.npf && item.npf !== '-' && (
+                          <a href={item.npf} target="_blank" rel="noreferrer" title="NP&F+ assessment reference"
+                            onClick={e => e.stopPropagation()}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                              background: '#FF6B0015', color: '#B84500', border: '1px solid #FF6B0044',
+                              borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}>
+                              🔗 {item.npf.split('/').pop() || 'NP&F+'}
+                          </a>
+                        )}
                       </div>
                     </div>
                   )
