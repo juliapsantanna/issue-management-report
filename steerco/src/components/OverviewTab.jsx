@@ -16,6 +16,24 @@ const BA_ALIASES = {
 }
 const normalizeBA = ba => BA_ALIASES[ba] || ba
 
+/* Format an ISO date (YYYY-MM-DD) as "31 Aug 2026"; returns null if empty/invalid */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const fmtDue = iso => {
+  if (!iso) return null
+  const [y, m, d] = String(iso).split('-')
+  if (!y || !m || !d) return null
+  return `${+d} ${MONTHS[+m - 1]} ${y}`
+}
+
+/* Sort drilldown items by due date, nearest first; items without a date go last */
+const byDueDate = (a, b) => {
+  const av = a.dueDate || '', bv = b.dueDate || ''
+  if (!av && !bv) return 0
+  if (!av) return 1
+  if (!bv) return -1
+  return av < bv ? -1 : av > bv ? 1 : 0
+}
+
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
 function AnimatedNumber({ value, color, size = 44 }) {
   const [display, setDisplay] = useState(0)
@@ -348,11 +366,11 @@ export default function OverviewTab({ issues, aps }) {
     if (chartType === 'Issue' || chartType === 'Potential Issue') {
       rows = issues
         .filter(i => normalizeBA(i['Business Area']) === ba && i.Type === chartType)
-        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating }))
+        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, dueDate: i.due_date_at }))
     } else {
       rows = aps
         .filter(a => normalizeBA(a['Business Area']) === ba)
-        .map(a => ({ code: a.ap_code, summary: a.ap_summary, link: a.ap_link_projac, status: a.ap_status, issueCode: a['Issue Code'], issueLink: a.issue_link_projac }))
+        .map(a => ({ code: a.ap_code, summary: a.ap_summary, link: a.ap_link_projac, status: a.ap_status, issueCode: a['Issue Code'], issueLink: a.issue_link_projac, dueDate: a.ap_due_date_at }))
     }
 
     setChartDrilldown(prev =>
@@ -363,8 +381,7 @@ export default function OverviewTab({ issues, aps }) {
   const handleRatingClick = useCallback((rating, color) => {
     const rows = filteredIssues
       .filter(i => i.overall_risk_rating === rating)
-      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type }))
-      .sort((a, b) => (a.type === 'Potential Issue' ? 1 : 0) - (b.type === 'Potential Issue' ? 1 : 0)) // confirmed first
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at }))
     setChartDrilldown(prev =>
       prev?.rating === rating ? null : { rating, title: `${rating} — Risk Rating`, titleColor: color, items: rows }
     )
@@ -540,7 +557,7 @@ export default function OverviewTab({ issues, aps }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {chartDrilldown.items.length === 0
               ? <div style={{ color: '#6B6B80', fontSize: 13, textAlign: 'center', padding: 24 }}>No items found</div>
-              : chartDrilldown.items.map((item, i) => {
+              : [...chartDrilldown.items].sort(byDueDate).map((item, i) => {
                   const STATUS_COLOR = { Late: '#E0002A', 'On Track': '#007A57', TBD: '#D48000', 'In Validation': '#1A6FCC' }
                   const RATING_COLOR = { 'Very High': '#9B0020', High: '#E0002A', Medium: '#D48000', Low: '#1A6FCC' }
                   const statusColor = STATUS_COLOR[item.status] || '#6B6B80'
@@ -585,6 +602,17 @@ export default function OverviewTab({ issues, aps }) {
                             border: `1px solid ${(RATING_COLOR[item.rating] || '#888')}44`,
                             borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>{item.rating}</span>
                         )}
+                        {fmtDue(item.dueDate) && (() => {
+                          const overdue = item.status === 'Late'
+                          const dColor = overdue ? '#E0002A' : '#6B6B80'
+                          return (
+                            <span style={{ background: dColor + '12', color: dColor,
+                              border: `1px solid ${dColor}33`, borderRadius: 6,
+                              padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>
+                              📅 Due {fmtDue(item.dueDate)}
+                            </span>
+                          )
+                        })()}
                       </div>
                     </div>
                   )
