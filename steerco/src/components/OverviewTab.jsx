@@ -471,6 +471,20 @@ export default function OverviewTab({ issues, aps }) {
     return Object.values(map).sort((a, b) => b.total - a.total)
   })()
 
+  // Subcategory x Risk Rating (cross-filtered) — same stacked solid/striped language
+  const subcategoryData = (() => {
+    const map = {}
+    filteredIssues.forEach(r => {
+      const subcategory = (r.subcategory || '').trim() || 'Unknown'
+      if (!map[subcategory]) map[subcategory] = { subcategory, total: 0 }
+      const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
+      const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
+      map[subcategory][key] = (map[subcategory][key] || 0) + 1
+      map[subcategory].total++
+    })
+    return Object.values(map).sort((a, b) => b.total - a.total)
+  })()
+
   const [chartDrilldown, setChartDrilldown] = useState(null) // { ba, type, items }
 
   const handleBAClick = useCallback((data, chartType) => {
@@ -515,6 +529,17 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [filteredIssues])
 
+  const handleSubcategoryClick = useCallback((data) => {
+    const subcategory = data?.activePayload?.[0]?.payload?.subcategory
+    if (!subcategory) return
+    const rows = filteredIssues
+      .filter(i => ((i.subcategory || '').trim() || 'Unknown') === subcategory)
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+    setChartDrilldown(prev =>
+      prev?.subcategory === subcategory ? null : { subcategory, title: `${subcategory} — Subcategory`, items: rows }
+    )
+  }, [filteredIssues])
+
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
   const BAYAxis = ({ selectedBA }) => ({
@@ -540,6 +565,24 @@ export default function OverviewTab({ issues, aps }) {
     tick: OriginYTick
   }
 
+  const subcategoryGrandTotal = subcategoryData.reduce((s, d) => s + d.total, 0)
+
+  const SubcategoryYTick = ({ x, y, payload }) => {
+    const row = subcategoryData.find(d => d.subcategory === payload.value)
+    const pct = row && subcategoryGrandTotal ? Math.round((row.total / subcategoryGrandTotal) * 100) : 0
+    return (
+      <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#1A1A2E">
+        {payload.value.length > 34 ? `${payload.value.slice(0, 33)}…` : payload.value}
+        <tspan fill="#6B6B80" fontSize={10}> ({row?.total ?? 0} · {pct}%)</tspan>
+      </text>
+    )
+  }
+
+  const SubcategoryYAxis = {
+    type: 'category', dataKey: 'subcategory', width: 280, axisLine: false, tickLine: false, interval: 0,
+    tick: SubcategoryYTick
+  }
+
   return (
     <div>
       {/* Active filter pills */}
@@ -562,7 +605,7 @@ export default function OverviewTab({ issues, aps }) {
 
       {/* Row 1: Issues by BA (confirmed solid + potential striped) | Status donut + Risk Rating */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'stretch' }}>
-        <ChartCard title="Issues by Business Area" subtitle="Solid = confirmed · striped = potential · click a bar to filter" fill>
+        <ChartCard title="Issues by Business Area" subtitle="Solid = issue · striped = potential · click a bar to filter" fill>
           <ResponsiveContainer width="100%" height={Math.max(200, baIssuesData.length * 34)}>
             <BarChart data={baIssuesData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={d => handleBAClick(d, 'Issue')} style={{ cursor: 'pointer' }}>
@@ -646,7 +689,7 @@ export default function OverviewTab({ issues, aps }) {
 
       {/* Row 1.5: Issues by Origin, correlated with Risk Rating (same solid/striped language) */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = confirmed · striped = potential · click a bar to see the issues"
+        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -660,6 +703,36 @@ export default function OverviewTab({ issues, aps }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
               <YAxis {...OriginYAxis} />
+              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
+                payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
+              {RATINGS_ORDER.flatMap(name => [
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+              ])}
+            </BarChart>
+          </ResponsiveContainer>
+          <IssueTypeLegend />
+        </ChartCard>
+      </div>
+
+      {/* Row 1.6: Issues by Subcategory, correlated with Risk Rating (same solid/striped language) */}
+      <div style={{ marginBottom: 16 }}>
+        <ChartCard title="Issues by Subcategory & Risk Rating" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
+          right={
+            <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
+              fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {subcategoryGrandTotal} total
+            </span>
+          }>
+          <ResponsiveContainer width="100%" height={Math.max(160, subcategoryData.length * 40)}>
+            <BarChart data={subcategoryData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
+              onClick={handleSubcategoryClick} style={{ cursor: 'pointer' }}>
+              <StripeDefs colors={Object.values(RATING_COLORS)} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
+              <YAxis {...SubcategoryYAxis} />
               <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
@@ -712,9 +785,9 @@ export default function OverviewTab({ issues, aps }) {
               <span style={{ marginLeft: 10, fontSize: 12, color: '#6B6B80' }}>
                 {chartDrilldown.items.length} item{chartDrilldown.items.length !== 1 ? 's' : ''}
               </span>
-              {(chartDrilldown.rating || chartDrilldown.origin) && (
+              {(chartDrilldown.rating || chartDrilldown.origin || chartDrilldown.subcategory) && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: '#6B6B80' }}>
-                  · <b style={{ color: '#1A6FCC' }}>{chartDrilldown.items.filter(x => x.type === 'Issue').length}</b> confirmed
+                  · <b style={{ color: '#1A6FCC' }}>{chartDrilldown.items.filter(x => x.type === 'Issue').length}</b> issue
                   {' · '}<b style={{ color: '#D48000' }}>{chartDrilldown.items.filter(x => x.type === 'Potential Issue').length}</b> potential
                 </span>
               )}
