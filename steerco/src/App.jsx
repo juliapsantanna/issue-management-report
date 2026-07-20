@@ -3,6 +3,7 @@ import Header from './components/Header'
 import OverviewTab from './components/OverviewTab'
 import DetailsTab from './components/DetailsTab'
 import TrendTab from './components/TrendTab'
+import NPFTab from './components/NPFTab'
 
 function parseCSV(text) {
   if (!text?.trim()) return []
@@ -75,11 +76,15 @@ export default function App() {
         <button style={TAB_STYLE(tab==='trend')} onClick={() => setTab('trend')}>
           📈 Self-Identified
         </button>
+        <button style={TAB_STYLE(tab==='npf')} onClick={() => setTab('npf')}>
+          🧭 NP&F+
+        </button>
       </div>
 
       {tab === 'overview' && <OverviewTab issues={issues} aps={aps} />}
       {tab === 'details'  && <DetailsTab  issues={issues} aps={aps} />}
       {tab === 'trend'    && <TrendTab    issues={issues} />}
+      {tab === 'npf'      && <NPFTab      issues={issues} />}
     </div>
   )
 }
