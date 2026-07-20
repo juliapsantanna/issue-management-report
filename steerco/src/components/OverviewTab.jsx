@@ -458,35 +458,34 @@ export default function OverviewTab({ issues, aps }) {
     }
   })
 
-  // Origin x Risk Rating (cross-filtered) — each origin becomes a stacked bar with
-  // one solid/striped pair per rating, same visual language as the BA chart.
-  const originData = (() => {
-    const map = {}
+  // Origin > Subcategory, stacked by Risk Rating — a single hierarchical chart:
+  // one bold header bar per Origin (its Risk Rating breakdown), immediately followed
+  // by its Subcategory rows (smaller, indented) so Origin and Subcategory read as one
+  // correlated view instead of two separate charts that didn't visually line up.
+  const combinedOriginData = (() => {
+    const originMap = {}
     filteredIssues.forEach(r => {
       const origin = (r.origin || '').trim() || 'Unknown'
-      if (!map[origin]) map[origin] = { origin, total: 0 }
+      const subcategory = (r.subcategory || '').trim() || 'Unknown'
       const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
       const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
-      map[origin][key] = (map[origin][key] || 0) + 1
-      map[origin].total++
+      if (!originMap[origin]) originMap[origin] = { origin, total: 0, subs: {} }
+      originMap[origin][key] = (originMap[origin][key] || 0) + 1
+      originMap[origin].total++
+      if (!originMap[origin].subs[subcategory]) originMap[origin].subs[subcategory] = { origin, subcategory, total: 0 }
+      originMap[origin].subs[subcategory][key] = (originMap[origin].subs[subcategory][key] || 0) + 1
+      originMap[origin].subs[subcategory].total++
     })
-    return Object.values(map).sort((a, b) => b.total - a.total)
-  })()
 
-  // Subcategory x Origin (cross-filtered) — correlates with the Origin & Risk Rating chart
-  // above instead of repeating Risk Rating (subcategory maps almost 1:1 to an origin, so
-  // pairing it with Origin surfaces new information instead of duplicating the rating split).
-  const subcategoryData = (() => {
-    const map = {}
-    filteredIssues.forEach(r => {
-      const subcategory = (r.subcategory || '').trim() || 'Unknown'
-      if (!map[subcategory]) map[subcategory] = { subcategory, total: 0 }
-      const origin = ORIGINS_ORDER.includes((r.origin || '').trim()) ? r.origin.trim() : 'Unknown'
-      const key = `${origin}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
-      map[subcategory][key] = (map[subcategory][key] || 0) + 1
-      map[subcategory].total++
+    const rows = []
+    Object.values(originMap).sort((a, b) => b.total - a.total).forEach(o => {
+      const { subs, ...originFields } = o
+      rows.push({ ...originFields, rowKey: `origin:${o.origin}`, label: o.origin, isHeader: true })
+      Object.values(subs).sort((a, b) => b.total - a.total).forEach(s => {
+        rows.push({ ...s, rowKey: `sub:${s.subcategory}`, label: s.subcategory, isHeader: false })
+      })
     })
-    return Object.values(map).sort((a, b) => b.total - a.total)
+    return rows
   })()
 
   const [chartDrilldown, setChartDrilldown] = useState(null) // { ba, type, items }
@@ -522,26 +521,26 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [filteredIssues])
 
-  const handleOriginClick = useCallback((data) => {
-    const origin = data?.activePayload?.[0]?.payload?.origin
-    if (!origin) return
-    const rows = filteredIssues
-      .filter(i => ((i.origin || '').trim() || 'Unknown') === origin)
-      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
-    setChartDrilldown(prev =>
-      prev?.origin === origin ? null : { origin, title: `${origin} — Origin`, items: rows }
-    )
-  }, [filteredIssues])
-
-  const handleSubcategoryClick = useCallback((data) => {
-    const subcategory = data?.activePayload?.[0]?.payload?.subcategory
-    if (!subcategory) return
-    const rows = filteredIssues
-      .filter(i => ((i.subcategory || '').trim() || 'Unknown') === subcategory)
-      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
-    setChartDrilldown(prev =>
-      prev?.subcategory === subcategory ? null : { subcategory, title: `${subcategory} — Subcategory`, items: rows }
-    )
+  const handleCombinedClick = useCallback((data) => {
+    const row = data?.activePayload?.[0]?.payload
+    if (!row) return
+    if (row.isHeader) {
+      const origin = row.origin
+      const rows = filteredIssues
+        .filter(i => ((i.origin || '').trim() || 'Unknown') === origin)
+        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+      setChartDrilldown(prev =>
+        prev?.origin === origin && !prev?.subcategory ? null : { origin, title: `${origin} — Origin`, items: rows }
+      )
+    } else {
+      const subcategory = row.subcategory
+      const rows = filteredIssues
+        .filter(i => ((i.subcategory || '').trim() || 'Unknown') === subcategory)
+        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+      setChartDrilldown(prev =>
+        prev?.subcategory === subcategory ? null : { subcategory, title: `${subcategory} — Subcategory (${row.origin})`, items: rows }
+      )
+    }
   }, [filteredIssues])
 
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
@@ -551,42 +550,31 @@ export default function OverviewTab({ issues, aps }) {
     tick: props => <BAYTick {...props} selectedBA={selectedBA} />
   })
 
-  const originGrandTotal = originData.reduce((s, d) => s + d.total, 0)
+  const combinedGrandTotal = combinedOriginData.filter(d => d.isHeader).reduce((s, d) => s + d.total, 0)
 
-  const OriginYTick = ({ x, y, payload }) => {
-    const row = originData.find(d => d.origin === payload.value)
-    const pct = row && originGrandTotal ? Math.round((row.total / originGrandTotal) * 100) : 0
-    return (
-      <text x={x} y={y} dy={4} textAnchor="end" fontSize={12} fill="#1A1A2E">
-        {payload.value}
-        <tspan fill="#6B6B80" fontSize={10}> ({row?.total ?? 0} · {pct}%)</tspan>
-      </text>
-    )
+  const CombinedYTick = ({ x, y, payload }) => {
+    const row = combinedOriginData.find(d => d.label === payload.value)
+    if (!row) return null
+    const pct = combinedGrandTotal ? Math.round((row.total / combinedGrandTotal) * 100) : 0
+    const label = row.label.length > 32 ? `${row.label.slice(0, 31)}…` : row.label
+    return row.isHeader
+      ? (
+        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={700} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}>
+          {label}
+          <tspan fill="#6B6B80" fontWeight={400} fontSize={10.5}> ({row.total} · {pct}%)</tspan>
+        </text>
+      )
+      : (
+        <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#6B6B80">
+          {label}
+          <tspan fill="#9B9BAA" fontSize={9.5}> ({row.total} · {pct}%)</tspan>
+        </text>
+      )
   }
 
-  const OriginYAxis = {
-    type: 'category', dataKey: 'origin', width: 200, axisLine: false, tickLine: false, interval: 0,
-    tick: OriginYTick
-  }
-
-  const subcategoryGrandTotal = subcategoryData.reduce((s, d) => s + d.total, 0)
-  const subcategoryOrigins = ORIGINS_ORDER.filter(o =>
-    subcategoryData.some(d => (d[`${o}_c`] || 0) + (d[`${o}_p`] || 0) > 0))
-
-  const SubcategoryYTick = ({ x, y, payload }) => {
-    const row = subcategoryData.find(d => d.subcategory === payload.value)
-    const pct = row && subcategoryGrandTotal ? Math.round((row.total / subcategoryGrandTotal) * 100) : 0
-    return (
-      <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#1A1A2E">
-        {payload.value.length > 34 ? `${payload.value.slice(0, 33)}…` : payload.value}
-        <tspan fill="#6B6B80" fontSize={10}> ({row?.total ?? 0} · {pct}%)</tspan>
-      </text>
-    )
-  }
-
-  const SubcategoryYAxis = {
-    type: 'category', dataKey: 'subcategory', width: 280, axisLine: false, tickLine: false, interval: 0,
-    tick: SubcategoryYTick
+  const CombinedYAxis = {
+    type: 'category', dataKey: 'label', width: 260, axisLine: false, tickLine: false, interval: 0,
+    tick: CombinedYTick
   }
 
   return (
@@ -693,60 +681,34 @@ export default function OverviewTab({ issues, aps }) {
         </div>
       </div>
 
-      {/* Row 1.5: Issues by Origin, correlated with Risk Rating (same solid/striped language) */}
+      {/* Row 1.5: Issues by Origin > Subcategory, stacked by Risk Rating — bold Origin
+          header bars, each followed by its own Subcategory breakdown rows */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Risk Rating" subtitle="click a bar to see the issues"
+        <ChartCard title="Issues by Origin & Subcategory" subtitle="bold = Origin total · click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-              {originGrandTotal} total
+              {combinedGrandTotal} total
             </span>
           }>
-          <ResponsiveContainer width="100%" height={Math.max(160, originData.length * 40)}>
-            <BarChart data={originData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={handleOriginClick} style={{ cursor: 'pointer' }}>
+          <ResponsiveContainer width="100%" height={Math.max(160, combinedOriginData.length * 34)}>
+            <BarChart data={combinedOriginData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
+              onClick={handleCombinedClick} style={{ cursor: 'pointer' }}>
               <StripeDefs colors={Object.values(RATING_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
-              <YAxis {...OriginYAxis} />
+              <YAxis {...CombinedYAxis} />
               <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
               {RATINGS_ORDER.flatMap(name => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none">
+                  {combinedOriginData.map(d => <Cell key={d.rowKey} fillOpacity={d.isHeader ? 1 : 0.75} />)}
+                </Bar>,
                 <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
-                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
-              ])}
-            </BarChart>
-          </ResponsiveContainer>
-          <IssueTypeLegend />
-        </ChartCard>
-      </div>
-
-      {/* Row 1.6: Issues by Subcategory, correlated with Origin (ties back into the Origin
-          & Risk Rating chart above instead of repeating the rating split) */}
-      <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Subcategory & Origin" subtitle="click a bar to see the issues"
-          right={
-            <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
-              fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-              {subcategoryGrandTotal} total
-            </span>
-          }>
-          <ResponsiveContainer width="100%" height={Math.max(160, subcategoryData.length * 40)}>
-            <BarChart data={subcategoryData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={handleSubcategoryClick} style={{ cursor: 'pointer' }}>
-              <StripeDefs colors={Object.values(ORIGIN_COLORS)} />
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
-              <YAxis {...SubcategoryYAxis} />
-              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={ORIGIN_COLORS} />} />
-              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
-                payload={subcategoryOrigins.map(name => ({ value: name, type: 'rect', color: ORIGIN_COLORS[name] }))} />
-              {subcategoryOrigins.flatMap((name, i) => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={ORIGIN_COLORS[name]} legendType="none" />,
-                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(ORIGIN_COLORS[name], true)} legendType="none"
-                  radius={i === subcategoryOrigins.length - 1 ? [0, 4, 4, 0] : undefined} />,
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined}>
+                  {combinedOriginData.map(d => <Cell key={d.rowKey} fillOpacity={d.isHeader ? 1 : 0.75} />)}
+                </Bar>,
               ])}
             </BarChart>
           </ResponsiveContainer>
