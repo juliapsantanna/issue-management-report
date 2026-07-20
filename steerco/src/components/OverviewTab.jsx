@@ -34,6 +34,16 @@ const byDueDate = (a, b) => {
   return av < bv ? -1 : av > bv ? 1 : 0
 }
 
+/* Days between today and an ISO due date (negative = overdue) */
+const SOON_THRESHOLD_DAYS = 14
+const daysUntil = iso => {
+  if (!iso) return null
+  const due = new Date(`${iso}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((due - today) / 86400000)
+}
+
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
 function AnimatedNumber({ value, color, size = 44 }) {
   const [display, setDisplay] = useState(0)
@@ -603,13 +613,16 @@ export default function OverviewTab({ issues, aps }) {
                             borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>{item.rating}</span>
                         )}
                         {fmtDue(item.dueDate) && (() => {
-                          const overdue = item.status === 'Late'
-                          const dColor = overdue ? '#E0002A' : '#6B6B80'
+                          const days = daysUntil(item.dueDate)
+                          const overdue = item.status === 'Late' || (days !== null && days < 0)
+                          const soon = !overdue && days !== null && days <= SOON_THRESHOLD_DAYS
+                          const dColor = overdue ? '#E0002A' : soon ? '#D48000' : '#6B6B80'
+                          const icon = overdue ? '⚠️' : soon ? '⏰' : '📅'
                           return (
                             <span style={{ background: dColor + '12', color: dColor,
                               border: `1px solid ${dColor}33`, borderRadius: 6,
                               padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>
-                              📅 Due {fmtDue(item.dueDate)}
+                              {icon} Due {fmtDue(item.dueDate)}
                             </span>
                           )
                         })()}
