@@ -550,11 +550,10 @@ export default function OverviewTab({ issues, aps }) {
     handleCombinedRow(data?.activePayload?.[0]?.payload)
   }, [handleCombinedRow])
 
-  // Risk Dictionary (L1 / L2) — which risk category shows up most often. Fields
-  // are semicolon-joined multi-value strings ("Operational Risk; Compliance and
-  // Legal Risk"), so an issue tagged with 2 categories counts toward both bars.
-  const [riskLevel, setRiskLevel] = useState('L1')
-  const riskField = riskLevel === 'L1' ? 'Risk L1' : 'Risk L2'
+  // Risk Dictionary (L2) — which risk category shows up most often. Field is a
+  // semicolon-joined multi-value string ("Operational Risk; Compliance and Legal
+  // Risk"), so an issue tagged with 2 categories counts toward both bars.
+  const riskField = 'Risk L2'
 
   const riskData = (() => {
     const map = {}
@@ -588,10 +587,10 @@ export default function OverviewTab({ issues, aps }) {
       })
       .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
     setChartDrilldown(prev =>
-      prev?.riskCategory === category && prev?.riskLevel === riskLevel ? null
-        : { riskCategory: category, riskLevel, title: `${category} — Risk ${riskLevel}`, items: rows }
+      prev?.riskCategory === category ? null
+        : { riskCategory: category, title: `${category} — Risk L2`, items: rows }
     )
-  }, [filteredIssues, riskField, riskLevel])
+  }, [filteredIssues])
 
   const handleRiskClick = useCallback((data) => {
     handleRiskRow(data?.activePayload?.[0]?.payload)
@@ -789,29 +788,14 @@ export default function OverviewTab({ issues, aps }) {
         </ChartCard>
       </div>
 
-      {/* Row 1.6: Issues by Risk Dictionary (L1/L2) — which risk category shows up most */}
+      {/* Row 1.6: Issues by Risk Dictionary (L2) — which risk category shows up most */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Risk Dictionary" subtitle="click a bar to see the issues"
+        <ChartCard title="Issues by Risk Dictionary (L2)" subtitle="click a bar to see the issues"
           right={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {['L1', 'L2'].map(lvl => {
-                  const active = riskLevel === lvl
-                  return (
-                    <button key={lvl} onClick={() => setRiskLevel(lvl)}
-                      style={{ fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: '4px 12px', borderRadius: 20,
-                        background: active ? '#1A1A2E' : '#F5F5F8', color: active ? '#fff' : '#6B6B80',
-                        border: active ? '1.5px solid #1A1A2E' : '1.5px solid transparent', transition: 'all 0.15s' }}>
-                      {lvl}
-                    </button>
-                  )
-                })}
-              </div>
-              <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
-                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                {riskGrandTotal} total
-              </span>
-            </div>
+            <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
+              fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {riskGrandTotal} total
+            </span>
           }>
           <ResponsiveContainer width="100%" height={Math.max(160, riskData.length * 34)}>
             <BarChart data={riskData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
