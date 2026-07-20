@@ -85,6 +85,8 @@ function KPICard({ label, total, late, color, icon }) {
 
 /* ─── Status Donut ────────────────────────────────────────────────────────── */
 const DONUT_COLORS = { Late: '#E0002A', TBD: '#D48000', 'On Track': '#007A57', 'In Validation': '#1A6FCC' }
+const RATING_COLORS = { 'Very High': '#9B0020', High: '#E0002A', Medium: '#D48000', Low: '#1A6FCC' }
+const RATINGS_ORDER = ['Very High', 'High', 'Medium', 'Low']
 const tooltipStyle = { background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
   boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 12 }
 
@@ -205,7 +207,7 @@ function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, t
 }
 
 /* ─── Custom tooltip for the stacked BA bar chart (readable status + I/P labels) ── */
-function BATooltip({ active, payload, label }) {
+function BATooltip({ active, payload, label, colorMap = DONUT_COLORS }) {
   if (!active || !payload?.length) return null
   const rows = payload.filter(p => p.value > 0)
   if (!rows.length) return null
@@ -215,7 +217,7 @@ function BATooltip({ active, payload, label }) {
       {rows.map(p => {
         const isPotential = p.dataKey.endsWith('_p')
         const status = p.dataKey.replace(/_[cp]$/, '')
-        const color = DONUT_COLORS[status] || '#6B6B80'
+        const color = colorMap[status] || '#6B6B80'
         return (
           <div key={p.dataKey} style={{ color }}>
             {status} ({isPotential ? 'Potential' : 'Issue'}): {p.value}
@@ -445,12 +447,8 @@ export default function OverviewTab({ issues, aps }) {
 
   // Rating (cross-filtered) — split confirmed Issues vs Potential Issues so a
   // scary rating (e.g. 1 Very High) doesn't alarm when it's only a potential issue
-  const ratingData = [
-    { name: 'Very High', color: '#9B0020' },
-    { name: 'High',      color: '#E0002A' },
-    { name: 'Medium',    color: '#D48000' },
-    { name: 'Low',       color: '#1A6FCC' },
-  ].map(({ name, color }) => {
+  const ratingData = RATINGS_ORDER.map(name => {
+    const color = RATING_COLORS[name]
     const rows = filteredIssues.filter(i => i.overall_risk_rating === name)
     return {
       name, color,
@@ -459,6 +457,21 @@ export default function OverviewTab({ issues, aps }) {
       potential: rows.filter(i => i.Type === 'Potential Issue').length,
     }
   })
+
+  // Origin x Risk Rating (cross-filtered) — each origin becomes a stacked bar with
+  // one solid/striped pair per rating, same visual language as the BA chart.
+  const originData = (() => {
+    const map = {}
+    filteredIssues.forEach(r => {
+      const origin = (r.origin || '').trim() || 'Unknown'
+      if (!map[origin]) map[origin] = { origin, total: 0 }
+      const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
+      const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
+      map[origin][key] = (map[origin][key] || 0) + 1
+      map[origin].total++
+    })
+    return Object.values(map).sort((a, b) => b.total - a.total)
+  })()
 
   const [chartDrilldown, setChartDrilldown] = useState(null) // { ba, type, items }
 
@@ -493,12 +506,28 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [filteredIssues])
 
+  const handleOriginClick = useCallback((data) => {
+    const origin = data?.activePayload?.[0]?.payload?.origin
+    if (!origin) return
+    const rows = filteredIssues
+      .filter(i => ((i.origin || '').trim() || 'Unknown') === origin)
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+    setChartDrilldown(prev =>
+      prev?.origin === origin ? null : { origin, title: `${origin} — Origin`, items: rows }
+    )
+  }, [filteredIssues])
+
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
   const BAYAxis = ({ selectedBA }) => ({
     type: 'category', dataKey: 'ba', width: 190, axisLine: false, tickLine: false, interval: 0,
     tick: props => <BAYTick {...props} selectedBA={selectedBA} />
   })
+
+  const OriginYAxis = {
+    type: 'category', dataKey: 'origin', width: 160, axisLine: false, tickLine: false, interval: 0,
+    tick: { fontSize: 12, fill: '#1A1A2E' }
+  }
 
   return (
     <div>
@@ -604,6 +633,30 @@ export default function OverviewTab({ issues, aps }) {
         </div>
       </div>
 
+      {/* Row 1.5: Issues by Origin, correlated with Risk Rating (same solid/striped language) */}
+      <div style={{ marginBottom: 16 }}>
+        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = confirmed · striped = potential · click a bar to see the issues">
+          <ResponsiveContainer width="100%" height={Math.max(160, originData.length * 40)}>
+            <BarChart data={originData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
+              onClick={handleOriginClick} style={{ cursor: 'pointer' }}>
+              <StripeDefs colors={Object.values(RATING_COLORS)} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
+              <YAxis {...OriginYAxis} />
+              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
+                payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
+              {RATINGS_ORDER.flatMap(name => [
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+              ])}
+            </BarChart>
+          </ResponsiveContainer>
+          <IssueTypeLegend />
+        </ChartCard>
+      </div>
+
       {/* Row 2: Action Plans by BA */}
       <div style={{ marginBottom: 16 }}>
         <ChartCard title="Action Plans by Business Area" subtitle="Click a bar to filter and see items below">
@@ -642,7 +695,7 @@ export default function OverviewTab({ issues, aps }) {
               <span style={{ marginLeft: 10, fontSize: 12, color: '#6B6B80' }}>
                 {chartDrilldown.items.length} item{chartDrilldown.items.length !== 1 ? 's' : ''}
               </span>
-              {chartDrilldown.rating && (
+              {(chartDrilldown.rating || chartDrilldown.origin) && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: '#6B6B80' }}>
                   · <b style={{ color: '#1A6FCC' }}>{chartDrilldown.items.filter(x => x.type === 'Issue').length}</b> confirmed
                   {' · '}<b style={{ color: '#D48000' }}>{chartDrilldown.items.filter(x => x.type === 'Potential Issue').length}</b> potential
