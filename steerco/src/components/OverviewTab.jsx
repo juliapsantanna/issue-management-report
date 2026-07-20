@@ -550,6 +550,72 @@ export default function OverviewTab({ issues, aps }) {
     handleCombinedRow(data?.activePayload?.[0]?.payload)
   }, [handleCombinedRow])
 
+  // Risk Dictionary (L1 / L2) — which risk category shows up most often. Fields
+  // are semicolon-joined multi-value strings ("Operational Risk; Compliance and
+  // Legal Risk"), so an issue tagged with 2 categories counts toward both bars.
+  const [riskLevel, setRiskLevel] = useState('L1')
+  const riskField = riskLevel === 'L1' ? 'Risk L1' : 'Risk L2'
+
+  const riskData = (() => {
+    const map = {}
+    filteredIssues.forEach(r => {
+      const raw = (r[riskField] || '').trim()
+      const cats = raw ? raw.split(';').map(c => c.trim()).filter(Boolean) : ['Uncategorized']
+      const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
+      const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
+      cats.forEach(cat => {
+        if (!map[cat]) map[cat] = { category: cat, total: 0 }
+        map[cat][key] = (map[cat][key] || 0) + 1
+        map[cat].total++
+      })
+    })
+    const rows = Object.values(map).sort((a, b) => b.total - a.total)
+    const maxTotal = rows.reduce((m, r) => Math.max(m, r.total), 0)
+    rows.forEach(r => { r._hit = maxTotal })
+    return rows
+  })()
+
+  const riskGrandTotal = riskData.reduce((s, d) => s + d.total, 0)
+
+  const handleRiskRow = useCallback((row) => {
+    if (!row) return
+    const category = row.category
+    const rows = filteredIssues
+      .filter(i => {
+        const raw = (i[riskField] || '').trim()
+        const cats = raw ? raw.split(';').map(c => c.trim()).filter(Boolean) : ['Uncategorized']
+        return cats.includes(category)
+      })
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+    setChartDrilldown(prev =>
+      prev?.riskCategory === category && prev?.riskLevel === riskLevel ? null
+        : { riskCategory: category, riskLevel, title: `${category} — Risk ${riskLevel}`, items: rows }
+    )
+  }, [filteredIssues, riskField, riskLevel])
+
+  const handleRiskClick = useCallback((data) => {
+    handleRiskRow(data?.activePayload?.[0]?.payload)
+  }, [handleRiskRow])
+
+  const RiskYTick = ({ x, y, payload }) => {
+    const row = riskData.find(d => d.category === payload.value)
+    if (!row) return null
+    const pct = riskGrandTotal ? Math.round((row.total / riskGrandTotal) * 100) : 0
+    const label = row.category.length > 32 ? `${row.category.slice(0, 31)}…` : row.category
+    return (
+      <text x={x} y={y} dy={4} textAnchor="end" fontSize={11.5} fill="#1A1A2E"
+        onClick={() => handleRiskRow(row)} style={{ cursor: 'pointer' }}>
+        {label}
+        <tspan fill="#6B6B80" fontSize={10}> ({row.total} · {pct}%)</tspan>
+      </text>
+    )
+  }
+
+  const RiskYAxis = {
+    type: 'category', dataKey: 'category', width: 260, axisLine: false, tickLine: false, interval: 0,
+    tick: RiskYTick
+  }
+
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
   const BAYAxis = ({ selectedBA }) => ({
@@ -723,6 +789,52 @@ export default function OverviewTab({ issues, aps }) {
         </ChartCard>
       </div>
 
+      {/* Row 1.6: Issues by Risk Dictionary (L1/L2) — which risk category shows up most */}
+      <div style={{ marginBottom: 16 }}>
+        <ChartCard title="Issues by Risk Dictionary" subtitle="click a bar to see the issues"
+          right={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['L1', 'L2'].map(lvl => {
+                  const active = riskLevel === lvl
+                  return (
+                    <button key={lvl} onClick={() => setRiskLevel(lvl)}
+                      style={{ fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: '4px 12px', borderRadius: 20,
+                        background: active ? '#1A1A2E' : '#F5F5F8', color: active ? '#fff' : '#6B6B80',
+                        border: active ? '1.5px solid #1A1A2E' : '1.5px solid transparent', transition: 'all 0.15s' }}>
+                      {lvl}
+                    </button>
+                  )
+                })}
+              </div>
+              <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
+                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                {riskGrandTotal} total
+              </span>
+            </div>
+          }>
+          <ResponsiveContainer width="100%" height={Math.max(160, riskData.length * 34)}>
+            <BarChart data={riskData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
+              onClick={handleRiskClick} style={{ cursor: 'pointer' }}>
+              <StripeDefs colors={Object.values(RATING_COLORS)} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
+              <YAxis {...RiskYAxis} />
+              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
+                payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
+              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} />
+              {RATINGS_ORDER.flatMap(name => [
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+              ])}
+            </BarChart>
+          </ResponsiveContainer>
+          <IssueTypeLegend />
+        </ChartCard>
+      </div>
+
       {/* Row 2: Action Plans by BA */}
       <div style={{ marginBottom: 16 }}>
         <ChartCard title="Action Plans by Business Area" subtitle="Click a bar to filter and see items below">
@@ -761,7 +873,7 @@ export default function OverviewTab({ issues, aps }) {
               <span style={{ marginLeft: 10, fontSize: 12, color: '#6B6B80' }}>
                 {chartDrilldown.items.length} item{chartDrilldown.items.length !== 1 ? 's' : ''}
               </span>
-              {(chartDrilldown.rating || chartDrilldown.origin || chartDrilldown.subcategory) && (
+              {(chartDrilldown.rating || chartDrilldown.origin || chartDrilldown.subcategory || chartDrilldown.riskCategory) && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: '#6B6B80' }}>
                   · <b style={{ color: '#1A6FCC' }}>{chartDrilldown.items.filter(x => x.type === 'Issue').length}</b> issue
                   {' · '}<b style={{ color: '#D48000' }}>{chartDrilldown.items.filter(x => x.type === 'Potential Issue').length}</b> potential

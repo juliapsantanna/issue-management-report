@@ -84,6 +84,8 @@ SELECT
   i.accountable_email,
   macroprocess.process_journey_macroprocess__name,
   i.overall_risk_rating,
+  i.risk_categories,
+  i.risk_categories_l2,
   i.origin,
   i.subcategory,
   i.residual_risk_level,
@@ -239,6 +241,14 @@ def first_name_from_list(val):
     cleaned = re.sub(r'[\[\]"\'\\]', '', str(val))
     names   = [n.strip() for n in cleaned.split(',') if n.strip()]
     return names[0] if names else ''
+
+def clean_array(val):
+    """Extrai valores de strings como '["Operational Risk"]' -> 'Operational Risk'."""
+    if not val or str(val).strip() in ('', '[]', 'null', 'None'):
+        return ''
+    cleaned = re.sub(r'[\[\]"\'\\]', '', str(val))
+    items   = [v.strip() for v in cleaned.split(',') if v.strip()]
+    return '; '.join(items)
 
 def parse_npf_keys(val):
     """
@@ -614,7 +624,7 @@ def run():
         'process_journey_macroprocess__name', 'overall_risk_rating', 'origin',
         'subcategory', 'residual_risk_level', 'responsible_name', 'accountable_name',
         'business_units', 'Action', 'Action Owner', 'Action Owner Email',
-        'Action Pending From', 'Business Area',
+        'Action Pending From', 'Business Area', 'Risk L1', 'Risk L2',
     ]
 
     TERMINAL_ISSUE_STATUSES = {'Risk Accepted', 'Cancelled', 'Done', 'Completed'}
@@ -703,6 +713,8 @@ def run():
         out['Action Owner Email']  = name_to_email.get(primary_owner.lower(), '')
         out['Action Pending From'] = bu
         out['Business Area']       = normalize_ba(ba)
+        out['Risk L1']             = clean_array(row.get('risk_categories', ''))
+        out['Risk L2']             = clean_array(row.get('risk_categories_l2', ''))
         issues_output.append(out)
 
     # ── 5. Enriquecer Action Plans ─────────────────────────────────────────────
