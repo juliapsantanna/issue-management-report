@@ -190,13 +190,53 @@ function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, t
                 cursor: 'pointer', fontSize: 12, fontWeight: active ? 700 : 400,
                 color: active ? c : '#6B6B80', transition: 'all 0.15s' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, display: 'inline-block' }} />
-              {name} ({total}{potential > 0 ? ` · ${potential} pot.` : ''})
+              {name} ({total - potential} I{potential > 0 ? ` · ${potential} P` : ''})
             </button>
           )
         })}
       </div>
+      <div style={{ textAlign: 'center', marginTop: 4, fontSize: 10.5, color: '#6B6B80' }}>
+        I = Issue · P = Potential issue
+      </div>
       </>
       }
+    </div>
+  )
+}
+
+/* ─── Custom tooltip for the stacked BA bar chart (readable status + I/P labels) ── */
+function BATooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const rows = payload.filter(p => p.value > 0)
+  if (!rows.length) return null
+  return (
+    <div style={{ ...tooltipStyle, padding: '8px 12px' }}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      {rows.map(p => {
+        const isPotential = p.dataKey.endsWith('_p')
+        const status = p.dataKey.replace(/_[cp]$/, '')
+        const color = DONUT_COLORS[status] || '#6B6B80'
+        return (
+          <div key={p.dataKey} style={{ color }}>
+            {status} ({isPotential ? 'Potential' : 'Issue'}): {p.value}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ─── Issue vs Potential Issue legend (solid = issue, striped = potential) ──── */
+function IssueTypeLegend({ justify = 'center' }) {
+  return (
+    <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10.5, color: '#6B6B80', justifyContent: justify, flexWrap: 'wrap' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 16, height: 8, borderRadius: 2, background: '#6B6B80', display: 'inline-block' }} /> Issue
+      </span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 16, height: 8, borderRadius: 2, display: 'inline-block',
+          backgroundImage: 'repeating-linear-gradient(45deg, #6B6B80 0, #6B6B80 2px, #F0EDF5 2px, #F0EDF5 5px)' }} /> Potential issue
+      </span>
     </div>
   )
 }
@@ -490,7 +530,7 @@ export default function OverviewTab({ issues, aps }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
               <YAxis {...BAYAxis({ selectedBA })} />
-              <Tooltip contentStyle={tooltipStyle} />
+              <Tooltip contentStyle={tooltipStyle} content={<BATooltip />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={Object.entries(DONUT_COLORS).map(([name, color]) => ({ value: name, type: 'rect', color }))} />
               <Bar dataKey="On Track_c"      stackId="a" fill={DONUT_COLORS['On Track']}      opacity={barOp} legendType="none" />
@@ -503,6 +543,7 @@ export default function OverviewTab({ issues, aps }) {
               <Bar dataKey="Late_p"          stackId="a" fill={fillFor(DONUT_COLORS['Late'], true)}          opacity={barOp} legendType="none" radius={[0,4,4,0]} />
             </BarChart>
           </ResponsiveContainer>
+          <IssueTypeLegend />
         </ChartCard>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <StatusDonut confirmedRows={issuesOnly} potentialRows={potIssues} selectedStatus={selectedStatus} onSelect={setSelectedStatus} />
