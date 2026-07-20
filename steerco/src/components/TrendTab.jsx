@@ -21,23 +21,23 @@ const BA_PALETTE = ['#8A05BE', '#1A6FCC', '#007A57', '#D48000', '#E0002A',
   '#7C3AED', '#0E9F9F', '#C2185B', '#5B7C00', '#B26A00', '#3949AB', '#00796B',
   '#9C27B0', '#F4511E']
 
-const MONTHS_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const MONTHS_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const fmtMonth = ym => {
   const [y, m] = ym.split('-')
-  return `${MONTHS_PT[(+m) - 1]}/${y.slice(2)}`
+  return `${MONTHS_EN[(+m) - 1]}/${y.slice(2)}`
 }
 
 const tooltipStyle = { background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
   fontSize: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.12)' }
 
 const TYPE_OPTS = [
-  { key: 'Ambos', label: 'Ambos' },
+  { key: 'Both', label: 'Both' },
   { key: 'Issue', label: 'Issues' },
   { key: 'Potential Issue', label: 'Potential Issues' },
 ]
 
 export default function TrendTab({ issues }) {
-  const [typeFilter, setTypeFilter] = useState('Ambos')
+  const [typeFilter, setTypeFilter] = useState('Both')
   const [hiddenBAs, setHiddenBAs] = useState(() => new Set())
   const [selected, setSelected] = useState(null)   // { month, ba }
 
@@ -71,10 +71,10 @@ export default function TrendTab({ issues }) {
     return out
   }, [selfIssues])
 
-  const matchesType = d => typeFilter === 'Ambos' || d.type === typeFilter
+  const matchesType = d => typeFilter === 'Both' || d.type === typeFilter
 
-  /* Issues cuja origem NÃO é self-identified (External Parties, Regulator's finding, etc.),
-     criadas em cada mês — é contra isso que o self-identified precisa ser comparado */
+  /* Issues whose origin is NOT self-identified (External Parties, Regulator's finding, etc.),
+     created each month — this is what self-identified needs to be compared against */
   const externalByMonth = useMemo(() => {
     const map = {}
     issues.forEach(r => {
@@ -152,26 +152,26 @@ export default function TrendTab({ issues }) {
             </div>
           )}
         </div>
-        <div style={{ fontSize: 10, color: '#8A05BE', marginTop: 6 }}>clique para ver os issues ↓</div>
+        <div style={{ fontSize: 10, color: '#8A05BE', marginTop: 6 }}>click to see the issues ↓</div>
       </div>
     )
   }
 
   if (!selfIssues.length) return (
     <div style={{ color: '#6B6B80', padding: 40, textAlign: 'center' }}>
-      Nenhuma issue self-identified com data de criação encontrada.
+      No self-identified issue with a creation date was found.
     </div>
   )
 
   return (
     <div>
-      {/* Resumo + toggle */}
+      {/* Summary + toggle */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E' }}>Self-Identified Issues por mês</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E' }}>Self-Identified Issues by Month</div>
           <div style={{ fontSize: 13, color: '#6B6B80', marginTop: 4 }}>
-            {selfIssues.length} issues ativas · {totals.Issue} Issues · {totals['Potential Issue']} Potential ·
+            {selfIssues.length} active issues · {totals.Issue} Issues · {totals['Potential Issue']} Potential ·
             {' '}{bas.length} Business Areas · origin: Self-Identified + Defense Assessment + Internal Audit
           </div>
         </div>
@@ -190,11 +190,11 @@ export default function TrendTab({ issues }) {
         </div>
       </div>
 
-      {/* Gráfico empilhado por BA */}
+      {/* Stacked chart by BA */}
       <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px',
         boxShadow: '0 1px 6px rgba(0,0,0,0.07)' }}>
         <div style={{ fontSize: 11, color: '#6B6B80', marginBottom: 12 }}>
-          Cada cor é uma Business Area · <b style={{ color: '#8A05BE' }}>clique numa barra para ver os issues</b> · clique na legenda para ocultar/mostrar
+          Each color is a Business Area · <b style={{ color: '#8A05BE' }}>click a bar to see the issues</b> · click the legend to hide/show
         </div>
         <ResponsiveContainer width="100%" height={420}>
           <ComposedChart data={chartData} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
@@ -232,7 +232,7 @@ export default function TrendTab({ issues }) {
         </ResponsiveContainer>
       </div>
 
-      {/* Painel de drill-down */}
+      {/* Drill-down panel */}
       {selected && (
         <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px', marginTop: 16,
           boxShadow: '0 1px 6px rgba(0,0,0,0.07)', borderTop: `4px solid ${baColor[selected.ba] || '#8A05BE'}` }}>
@@ -243,17 +243,17 @@ export default function TrendTab({ issues }) {
               </div>
               <div style={{ fontSize: 12, color: '#6B6B80', marginTop: 2 }}>
                 {drill.length} {drill.length === 1 ? 'issue' : 'issues'}
-                {typeFilter !== 'Ambos' && ` · ${TYPE_OPTS.find(o => o.key === typeFilter).label}`}
+                {typeFilter !== 'Both' && ` · ${TYPE_OPTS.find(o => o.key === typeFilter).label}`}
               </div>
             </div>
             <button onClick={() => setSelected(null)} style={{ background: '#F5F5F8', border: 'none',
               borderRadius: 8, padding: '6px 12px', fontSize: 13, fontWeight: 600, color: '#6B6B80', cursor: 'pointer' }}>
-              ✕ fechar
+              ✕ close
             </button>
           </div>
 
           {drill.length === 0
-            ? <div style={{ color: '#6B6B80', fontSize: 13 }}>Nenhum issue desse tipo nesse segmento.</div>
+            ? <div style={{ color: '#6B6B80', fontSize: 13 }}>No issue of this type in this segment.</div>
             : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {drill.map(d => (
