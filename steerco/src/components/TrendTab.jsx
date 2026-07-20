@@ -27,6 +27,14 @@ const fmtMonth = ym => {
   const [y, m] = ym.split('-')
   return `${MONTHS_EN[(+m) - 1]}/${y.slice(2)}`
 }
+const quarterOf = ym => {
+  const [y, m] = ym.split('-').map(Number)
+  return `${y}-Q${Math.floor((m - 1) / 3) + 1}`
+}
+const fmtQuarter = q => {
+  const [y, qq] = q.split('-Q')
+  return `Q${qq}/${y.slice(2)}`
+}
 
 const tooltipStyle = { background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
   fontSize: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.12)' }
@@ -37,10 +45,19 @@ const TYPE_OPTS = [
   { key: 'Potential Issue', label: 'Potential Issues' },
 ]
 
+const GRANULARITY_OPTS = [
+  { key: 'month', label: 'Monthly' },
+  { key: 'quarter', label: 'Quarterly' },
+]
+
 export default function TrendTab({ issues }) {
   const [typeFilter, setTypeFilter] = useState('Both')
+  const [granularity, setGranularity] = useState('month')
   const [hiddenBAs, setHiddenBAs] = useState(() => new Set())
-  const [selected, setSelected] = useState(null)   // { month, ba }
+  const [selected, setSelected] = useState(null)   // { period, ba }
+
+  const periodOf = granularity === 'quarter' ? quarterOf : (m => m)
+  const fmtPeriod = granularity === 'quarter' ? fmtQuarter : fmtMonth
 
   /* Self-identified de Global Lending, mantendo os campos completos */
   const selfIssues = useMemo(() => issues.filter(r =>
@@ -72,37 +89,40 @@ export default function TrendTab({ issues }) {
     return out
   }, [selfIssues])
 
+  const periods = useMemo(() => [...new Set(months.map(periodOf))].sort(), [months, granularity])
+
   const matchesType = d => typeFilter === 'Both' || d.type === typeFilter
 
-  /* Issues whose origin is NOT self-identified (External Parties, Regulator's finding, etc.),
-     created each month — this is what self-identified needs to be compared against */
-  const externalByMonth = useMemo(() => {
+  /* Issues whose origin is NOT self-identified (Defense Assessment, External Parties,
+     Regulator's Finding, etc.), grouped by period — what self-identified is compared against */
+  const externalByPeriod = useMemo(() => {
     const map = {}
     issues.forEach(r => {
       if (!r.created_at) return
       if (SELF_ORIGINS.has((r.origin || '').trim())) return
       const type = (r.Type || '').trim() === 'Potential Issue' ? 'Potential Issue' : 'Issue'
       if (!matchesType({ type })) return
-      const month = r.created_at.slice(0, 7)
-      map[month] = (map[month] || 0) + 1
+      const period = periodOf(r.created_at.slice(0, 7))
+      map[period] = (map[period] || 0) + 1
     })
     return map
-  }, [issues, typeFilter])
+  }, [issues, typeFilter, granularity])
 
   const chartData = useMemo(() => {
-    const base = Object.fromEntries(months.map(m => [m, Object.fromEntries(bas.map(b => [b, 0]))]))
+    const base = Object.fromEntries(periods.map(p => [p, Object.fromEntries(bas.map(b => [b, 0]))]))
     selfIssues.forEach(d => {
       if (!matchesType(d)) return
-      if (base[d.month]) base[d.month][d.ba]++
+      const p = periodOf(d.month)
+      if (base[p]) base[p][d.ba]++
     })
-    return months.map(m => {
-      const selfTotal = bas.reduce((s, b) => s + base[m][b], 0)
-      const externalTotal = externalByMonth[m] || 0
+    return periods.map(p => {
+      const selfTotal = bas.reduce((s, b) => s + base[p][b], 0)
+      const externalTotal = externalByPeriod[p] || 0
       const allTotal = selfTotal + externalTotal
       const pctSelf = allTotal ? Math.round((selfTotal / allTotal) * 1000) / 10 : null
-      return { month: m, total: selfTotal, externalTotal, allTotal, pctSelf, ...base[m] }
+      return { period: p, total: selfTotal, externalTotal, allTotal, pctSelf, ...base[p] }
     })
-  }, [months, bas, selfIssues, typeFilter, externalByMonth])
+  }, [periods, bas, selfIssues, typeFilter, externalByPeriod, granularity])
 
   const totals = useMemo(() => {
     const t = { Issue: 0, 'Potential Issue': 0 }
@@ -114,9 +134,9 @@ export default function TrendTab({ issues }) {
   const drill = useMemo(() => {
     if (!selected) return []
     return selfIssues
-      .filter(d => d.month === selected.month && d.ba === selected.ba && matchesType(d))
+      .filter(d => periodOf(d.month) === selected.period && d.ba === selected.ba && matchesType(d))
       .sort((a, b) => (a.type > b.type ? 1 : -1) || a.code.localeCompare(b.code))
-  }, [selected, selfIssues, typeFilter])
+  }, [selected, selfIssues, typeFilter, granularity])
 
   const toggleBA = ba => setHiddenBAs(prev => {
     const next = new Set(prev); next.has(ba) ? next.delete(ba) : next.add(ba); return next
@@ -132,7 +152,7 @@ export default function TrendTab({ issues }) {
     if (!total && !point?.externalTotal) return null
     return (
       <div style={{ ...tooltipStyle, padding: '8px 12px' }}>
-        <div style={{ fontWeight: 700, color: '#1A1A2E', marginBottom: 6 }}>{fmtMonth(label)} · {total} self-identified</div>
+        <div style={{ fontWeight: 700, color: '#1A1A2E', marginBottom: 6 }}>{fmtPeriod(label)} · {total} self-identified</div>
         {rows.map(p => (
           <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
             <span style={{ width: 9, height: 9, borderRadius: 2, background: p.color }} />
@@ -170,24 +190,41 @@ export default function TrendTab({ issues }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E' }}>Self-Identified Issues by Month</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E' }}>
+            Self-Identified Issues by {granularity === 'quarter' ? 'Quarter' : 'Month'}
+          </div>
           <div style={{ fontSize: 13, color: '#6B6B80', marginTop: 4 }}>
             {selfIssues.length} active issues · {totals.Issue} Issues · {totals['Potential Issue']} Potential ·
             {' '}{bas.length} Business Areas · origin: Self-Identified only
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {TYPE_OPTS.map(opt => {
-            const active = typeFilter === opt.key
-            return (
-              <button key={opt.key} onClick={() => setTypeFilter(opt.key)}
-                style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '6px 14px', borderRadius: 20,
-                  background: active ? '#8A05BE' : '#F5F5F8', color: active ? '#fff' : '#6B6B80',
-                  border: active ? '1.5px solid #8A05BE' : '1.5px solid transparent', transition: 'all 0.15s' }}>
-                {opt.label}
-              </button>
-            )
-          })}
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {GRANULARITY_OPTS.map(opt => {
+              const active = granularity === opt.key
+              return (
+                <button key={opt.key} onClick={() => { setGranularity(opt.key); setSelected(null) }}
+                  style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '6px 14px', borderRadius: 20,
+                    background: active ? '#1A1A2E' : '#F5F5F8', color: active ? '#fff' : '#6B6B80',
+                    border: active ? '1.5px solid #1A1A2E' : '1.5px solid transparent', transition: 'all 0.15s' }}>
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {TYPE_OPTS.map(opt => {
+              const active = typeFilter === opt.key
+              return (
+                <button key={opt.key} onClick={() => setTypeFilter(opt.key)}
+                  style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '6px 14px', borderRadius: 20,
+                    background: active ? '#8A05BE' : '#F5F5F8', color: active ? '#fff' : '#6B6B80',
+                    border: active ? '1.5px solid #8A05BE' : '1.5px solid transparent', transition: 'all 0.15s' }}>
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -200,7 +237,7 @@ export default function TrendTab({ issues }) {
         <ResponsiveContainer width="100%" height={420}>
           <ComposedChart data={chartData} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EEE" />
-            <XAxis dataKey="month" tickFormatter={fmtMonth} tick={{ fontSize: 11, fill: '#6B6B80' }}
+            <XAxis dataKey="period" tickFormatter={fmtPeriod} tick={{ fontSize: 11, fill: '#6B6B80' }}
               interval={0} angle={-35} textAnchor="end" height={50} />
             <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 11, fill: '#6B6B80' }} />
             <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`}
@@ -212,14 +249,14 @@ export default function TrendTab({ issues }) {
               <Bar key={ba} yAxisId="count" dataKey={ba} stackId="ba" hide={hiddenBAs.has(ba)} maxBarSize={48}
                 cursor="pointer"
                 onClick={(entry) => setSelected(
-                  selected && selected.month === entry.month && selected.ba === ba
-                    ? null : { month: entry.month, ba }
+                  selected && selected.period === entry.period && selected.ba === ba
+                    ? null : { period: entry.period, ba }
                 )}>
                 {chartData.map(d => {
-                  const isSel = selected && selected.month === d.month && selected.ba === ba
+                  const isSel = selected && selected.period === d.period && selected.ba === ba
                   const dim = selected && !isSel
                   return (
-                    <Cell key={d.month} fill={baColor[ba]} fillOpacity={dim ? 0.28 : 1}
+                    <Cell key={d.period} fill={baColor[ba]} fillOpacity={dim ? 0.28 : 1}
                       stroke={isSel ? '#1A1A2E' : 'none'} strokeWidth={1.5} />
                   )
                 })}
@@ -240,7 +277,7 @@ export default function TrendTab({ issues }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1A2E' }}>
-                {fmtMonth(selected.month)} · {selected.ba}
+                {fmtPeriod(selected.period)} · {selected.ba}
               </div>
               <div style={{ fontSize: 12, color: '#6B6B80', marginTop: 2 }}>
                 {drill.length} {drill.length === 1 ? 'issue' : 'issues'}
