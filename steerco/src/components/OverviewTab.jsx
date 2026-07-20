@@ -87,6 +87,8 @@ function KPICard({ label, total, late, color, icon }) {
 const DONUT_COLORS = { Late: '#E0002A', TBD: '#D48000', 'On Track': '#007A57', 'In Validation': '#1A6FCC' }
 const RATING_COLORS = { 'Very High': '#9B0020', High: '#E0002A', Medium: '#D48000', Low: '#1A6FCC' }
 const RATINGS_ORDER = ['Very High', 'High', 'Medium', 'Low']
+const ORIGIN_COLORS = { 'Self-Identified': '#007A57', 'Defense Assessment': '#8A05BE', 'Internal Audit': '#1A6FCC', 'External Parties': '#E0002A', "Regulator's Finding": '#D48000', Unknown: '#6B6B80' }
+const ORIGINS_ORDER = ['Self-Identified', 'Defense Assessment', 'Internal Audit', 'External Parties', "Regulator's Finding", 'Unknown']
 const tooltipStyle = { background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
   boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 12 }
 
@@ -471,14 +473,16 @@ export default function OverviewTab({ issues, aps }) {
     return Object.values(map).sort((a, b) => b.total - a.total)
   })()
 
-  // Subcategory x Risk Rating (cross-filtered) — same stacked solid/striped language
+  // Subcategory x Origin (cross-filtered) — correlates with the Origin & Risk Rating chart
+  // above instead of repeating Risk Rating (subcategory maps almost 1:1 to an origin, so
+  // pairing it with Origin surfaces new information instead of duplicating the rating split).
   const subcategoryData = (() => {
     const map = {}
     filteredIssues.forEach(r => {
       const subcategory = (r.subcategory || '').trim() || 'Unknown'
       if (!map[subcategory]) map[subcategory] = { subcategory, total: 0 }
-      const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
-      const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
+      const origin = ORIGINS_ORDER.includes((r.origin || '').trim()) ? r.origin.trim() : 'Unknown'
+      const key = `${origin}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
       map[subcategory][key] = (map[subcategory][key] || 0) + 1
       map[subcategory].total++
     })
@@ -566,6 +570,8 @@ export default function OverviewTab({ issues, aps }) {
   }
 
   const subcategoryGrandTotal = subcategoryData.reduce((s, d) => s + d.total, 0)
+  const subcategoryOrigins = ORIGINS_ORDER.filter(o =>
+    subcategoryData.some(d => (d[`${o}_c`] || 0) + (d[`${o}_p`] || 0) > 0))
 
   const SubcategoryYTick = ({ x, y, payload }) => {
     const row = subcategoryData.find(d => d.subcategory === payload.value)
@@ -717,9 +723,10 @@ export default function OverviewTab({ issues, aps }) {
         </ChartCard>
       </div>
 
-      {/* Row 1.6: Issues by Subcategory, correlated with Risk Rating (same solid/striped language) */}
+      {/* Row 1.6: Issues by Subcategory, correlated with Origin (ties back into the Origin
+          & Risk Rating chart above instead of repeating the rating split) */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Subcategory & Risk Rating" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
+        <ChartCard title="Issues by Subcategory & Origin" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -729,17 +736,17 @@ export default function OverviewTab({ issues, aps }) {
           <ResponsiveContainer width="100%" height={Math.max(160, subcategoryData.length * 40)}>
             <BarChart data={subcategoryData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={handleSubcategoryClick} style={{ cursor: 'pointer' }}>
-              <StripeDefs colors={Object.values(RATING_COLORS)} />
+              <StripeDefs colors={Object.values(ORIGIN_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
               <YAxis {...SubcategoryYAxis} />
-              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
+              <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={ORIGIN_COLORS} />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
-                payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
-              {RATINGS_ORDER.flatMap(name => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
-                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
-                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+                payload={subcategoryOrigins.map(name => ({ value: name, type: 'rect', color: ORIGIN_COLORS[name] }))} />
+              {subcategoryOrigins.flatMap((name, i) => [
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={ORIGIN_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(ORIGIN_COLORS[name], true)} legendType="none"
+                  radius={i === subcategoryOrigins.length - 1 ? [0, 4, 4, 0] : undefined} />,
               ])}
             </BarChart>
           </ResponsiveContainer>
