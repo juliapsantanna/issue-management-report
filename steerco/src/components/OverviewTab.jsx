@@ -168,13 +168,16 @@ function FilterPill({ label, color, onClear }) {
 }
 
 /* ─── Chart wrapper ───────────────────────────────────────────────────────── */
-function ChartCard({ title, subtitle, children }) {
+function ChartCard({ title, subtitle, right, children }) {
   return (
     <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px',
       boxShadow: '0 1px 6px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.06)' }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 2 }}>{subtitle}</div>}
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 2 }}>{subtitle}</div>}
+        </div>
+        {right}
       </div>
       {children}
     </div>
@@ -481,7 +484,13 @@ export default function OverviewTab({ issues, aps }) {
           }
         </ChartCard>
 
-        <ChartCard title="Issues by Risk Rating" subtitle="Filtered by active status & BA · Click a rating to see the issues">
+        <ChartCard title="Issues by Risk Rating" subtitle="Filtered by active status & BA · Click a rating to see the issues"
+          right={
+            <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
+              fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {filteredIssues.length} total
+            </span>
+          }>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 0' }}>
             {ratingData.map(({ name, value, color, confirmed, potential }) => {
               const total = filteredIssues.length
