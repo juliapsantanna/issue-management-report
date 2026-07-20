@@ -535,8 +535,8 @@ export default function OverviewTab({ issues, aps }) {
                       {value} ({pct}%)
                       {potential > 0 && (
                         <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600 }}>
-                          · <span style={{ color: '#1A6FCC' }}>{confirmed} issue{confirmed !== 1 ? 's' : ''}</span>
-                          {' + '}<span style={{ color: '#D48000' }}>{potential} pot.</span>
+                          · <span style={{ color: '#1A6FCC' }}>{confirmed} issue{confirmed !== 1 ? 's' : ''} ({Math.round(confirmedPct)}%)</span>
+                          {' + '}<span style={{ color: '#D48000' }}>{potential} pot. ({Math.round(potentialPct)}%)</span>
                         </span>
                       )}
                     </span>
