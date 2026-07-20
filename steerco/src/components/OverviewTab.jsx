@@ -99,7 +99,7 @@ function ActiveShape({ cx, cy, innerRadius, outerRadius, startAngle, endAngle, f
   )
 }
 
-function StatusDonut({ donutData, selectedStatus, onSelect }) {
+function StatusDonut({ donutData, selectedStatus, onSelect, title = 'Issue Status', subtitle = 'Click to filter all charts', height = 220 }) {
   const [activeIndex, setActiveIndex] = useState(null)
   const handleClick = useCallback((_, index) => {
     const s = donutData[index]?.name
@@ -110,12 +110,15 @@ function StatusDonut({ donutData, selectedStatus, onSelect }) {
     <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px',
       boxShadow: '0 1px 6px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.06)' }}>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>Issue Status</div>
-        <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 2 }}>Click to filter all charts</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{title}</div>
+        <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 2 }}>{subtitle}</div>
       </div>
-      <ResponsiveContainer width="100%" height={220}>
+      {donutData.length === 0
+        ? <div style={{ padding: '32px 0', textAlign: 'center', color: '#6B6B80', fontSize: 13 }}>No items</div>
+        : <>
+      <ResponsiveContainer width="100%" height={height}>
         <PieChart>
-          <Pie data={donutData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}
+          <Pie data={donutData} cx="50%" cy="50%" innerRadius={Math.round(height * 0.25)} outerRadius={Math.round(height * 0.386)} paddingAngle={3}
             dataKey="value" activeIndex={activeIndex} activeShape={ActiveShape}
             onMouseEnter={(_, i) => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
             onClick={handleClick} style={{ cursor: 'pointer' }}>
@@ -145,6 +148,8 @@ function StatusDonut({ donutData, selectedStatus, onSelect }) {
           )
         })}
       </div>
+      </>
+      }
     </div>
   )
 }
@@ -343,9 +348,13 @@ export default function OverviewTab({ issues, aps }) {
   const baPotData     = buildBAData(issuesForCharts.filter(i => i.Type === 'Potential Issue'), issueStatus)
   const baAPsData     = buildBAData(apsForCharts,                                              apStatus)
 
-  // Status donut (BA-filtered)
-  const statusCount = issuesBA.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc }, {})
-  const donutData   = Object.entries(statusCount).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+  // Status donuts (BA-filtered), split confirmed Issues vs Potential Issues
+  const countByStatus = rows => {
+    const acc = rows.reduce((m, i) => { m[i.status] = (m[i.status] || 0) + 1; return m }, {})
+    return Object.entries(acc).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+  }
+  const donutDataIssues = countByStatus(issuesOnly)
+  const donutDataPot    = countByStatus(potIssues)
 
   // Rating (cross-filtered) — split confirmed Issues vs Potential Issues so a
   // scary rating (e.g. 1 Very High) doesn't alarm when it's only a potential issue
@@ -400,7 +409,7 @@ export default function OverviewTab({ issues, aps }) {
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
   const BAYAxis = ({ selectedBA }) => ({
-    type: 'category', dataKey: 'ba', width: 190, axisLine: false, tickLine: false,
+    type: 'category', dataKey: 'ba', width: 190, axisLine: false, tickLine: false, interval: 0,
     tick: props => <BAYTick {...props} selectedBA={selectedBA} />
   })
 
@@ -442,7 +451,12 @@ export default function OverviewTab({ issues, aps }) {
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-        <StatusDonut donutData={donutData} selectedStatus={selectedStatus} onSelect={setSelectedStatus} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <StatusDonut donutData={donutDataIssues} selectedStatus={selectedStatus} onSelect={setSelectedStatus}
+            title="Issue Status" subtitle="Confirmed issues · click to filter all charts" height={170} />
+          <StatusDonut donutData={donutDataPot} selectedStatus={selectedStatus} onSelect={setSelectedStatus}
+            title="Potential Issue Status" subtitle="Potential issues · click to filter all charts" height={170} />
+        </div>
       </div>
 
       {/* Row 2: Potential Issues by BA | Rating */}
