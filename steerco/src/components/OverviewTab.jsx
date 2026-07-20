@@ -88,23 +88,64 @@ const DONUT_COLORS = { Late: '#E0002A', TBD: '#D48000', 'On Track': '#007A57', '
 const tooltipStyle = { background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
   boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 12 }
 
+/* Diagonal-stripe SVG pattern (mirrors the CSS repeating-linear-gradient used
+   for "potential" bars elsewhere) so recharts SVG shapes can render the same
+   solid = confirmed / striped = potential language. */
+const patternId = color => `stripe-${color.replace('#', '')}`
+function StripeDefs({ colors }) {
+  return (
+    <defs>
+      {colors.map(c => (
+        <pattern key={c} id={patternId(c)} patternUnits="userSpaceOnUse" width={6} height={6} patternTransform="rotate(45)">
+          <rect width={6} height={6} fill="#F0EDF5" />
+          <rect width={2} height={6} fill={c} />
+        </pattern>
+      ))}
+    </defs>
+  )
+}
+const fillFor = (color, isPotential) => isPotential ? `url(#${patternId(color)})` : color
+
 function ActiveShape({ cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value }) {
   return (
     <g>
       <Sector cx={cx} cy={cy} innerRadius={innerRadius - 4} outerRadius={outerRadius + 8}
         startAngle={startAngle} endAngle={endAngle} fill={fill} />
       <text x={cx} y={cy - 10} textAnchor="middle" fill="#1A1A2E" fontSize={28} fontWeight={800}>{value}</text>
-      <text x={cx} y={cy + 16} textAnchor="middle" fill="#6B6B80" fontSize={12}>{payload.name}</text>
+      <text x={cx} y={cy + 16} textAnchor="middle" fill="#6B6B80" fontSize={12}>
+        {payload.name}{payload.isPotential ? ' · potential' : ''}
+      </text>
     </g>
   )
 }
 
-function StatusDonut({ donutData, selectedStatus, onSelect, title = 'Issue Status', subtitle = 'Click to filter all charts', height = 220 }) {
+/* confirmedRows/potentialRows: arrays of items with a `.status` field.
+   Renders one wedge per status (solid) immediately followed by a striped
+   wedge for its potential-issue share — same "riscadinho" language as the
+   Risk Rating bars, but merged into a single donut instead of two. */
+function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, title = 'Issue Status', subtitle = 'Solid = confirmed · striped = potential · click to filter', height = 220 }) {
   const [activeIndex, setActiveIndex] = useState(null)
+
+  const statusNames = [...new Set([...confirmedRows.map(r => r.status), ...potentialRows.map(r => r.status)])]
+  const counts = statusNames
+    .map(name => ({
+      name,
+      confirmed: confirmedRows.filter(r => r.status === name).length,
+      potential: potentialRows.filter(r => r.status === name).length,
+    }))
+    .map(c => ({ ...c, total: c.confirmed + c.potential }))
+    .sort((a, b) => b.total - a.total)
+
+  const slices = []
+  counts.forEach(({ name, confirmed, potential }) => {
+    if (confirmed > 0) slices.push({ name, value: confirmed, isPotential: false })
+    if (potential > 0) slices.push({ name, value: potential, isPotential: true })
+  })
+
   const handleClick = useCallback((_, index) => {
-    const s = donutData[index]?.name
+    const s = slices[index]?.name
     onSelect(prev => prev === s ? null : s)
-  }, [donutData, onSelect])
+  }, [slices, onSelect])
 
   return (
     <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px',
@@ -113,37 +154,43 @@ function StatusDonut({ donutData, selectedStatus, onSelect, title = 'Issue Statu
         <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{title}</div>
         <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 2 }}>{subtitle}</div>
       </div>
-      {donutData.length === 0
+      {slices.length === 0
         ? <div style={{ padding: '32px 0', textAlign: 'center', color: '#6B6B80', fontSize: 13 }}>No items</div>
         : <>
       <ResponsiveContainer width="100%" height={height}>
         <PieChart>
-          <Pie data={donutData} cx="50%" cy="50%" innerRadius={Math.round(height * 0.25)} outerRadius={Math.round(height * 0.386)} paddingAngle={3}
+          <StripeDefs colors={Object.values(DONUT_COLORS)} />
+          <Pie data={slices} cx="50%" cy="50%" innerRadius={Math.round(height * 0.25)} outerRadius={Math.round(height * 0.386)} paddingAngle={2}
             dataKey="value" activeIndex={activeIndex} activeShape={ActiveShape}
             onMouseEnter={(_, i) => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
             onClick={handleClick} style={{ cursor: 'pointer' }}>
-            {donutData.map(entry => (
-              <Cell key={entry.name} fill={DONUT_COLORS[entry.name] || '#8A05BE'}
-                opacity={selectedStatus && selectedStatus !== entry.name ? 0.3 : 1}
-                stroke={selectedStatus === entry.name ? '#1A1A2E' : 'none'}
-                strokeWidth={selectedStatus === entry.name ? 2 : 0} />
-            ))}
+            {slices.map((entry, i) => {
+              const color = DONUT_COLORS[entry.name] || '#8A05BE'
+              const dimmed = selectedStatus && selectedStatus !== entry.name
+              return (
+                <Cell key={i} fill={fillFor(color, entry.isPotential)}
+                  opacity={dimmed ? 0.3 : 1}
+                  stroke={selectedStatus === entry.name ? '#1A1A2E' : 'none'}
+                  strokeWidth={selectedStatus === entry.name ? 2 : 0} />
+              )
+            })}
           </Pie>
-          <Tooltip contentStyle={tooltipStyle} />
+          <Tooltip contentStyle={tooltipStyle}
+            formatter={(value, name, { payload }) => [value, `${name}${payload.isPotential ? ' (potential)' : ''}`]} />
         </PieChart>
       </ResponsiveContainer>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 4 }}>
-        {donutData.map(entry => {
-          const c = DONUT_COLORS[entry.name] || '#8A05BE'
-          const active = selectedStatus === entry.name
+        {counts.map(({ name, total, potential }) => {
+          const c = DONUT_COLORS[name] || '#8A05BE'
+          const active = selectedStatus === name
           return (
-            <button key={entry.name} onClick={() => onSelect(p => p === entry.name ? null : entry.name)}
+            <button key={name} onClick={() => onSelect(p => p === name ? null : name)}
               style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 20,
                 background: active ? c + '20' : '#F5F5F8', border: active ? `1.5px solid ${c}` : '1.5px solid transparent',
                 cursor: 'pointer', fontSize: 12, fontWeight: active ? 700 : 400,
                 color: active ? c : '#6B6B80', transition: 'all 0.15s' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, display: 'inline-block' }} />
-              {entry.name} ({entry.value})
+              {name} ({total}{potential > 0 ? ` · ${potential} pot.` : ''})
             </button>
           )
         })}
@@ -329,13 +376,17 @@ export default function OverviewTab({ issues, aps }) {
   const issuesOnly = issuesBA.filter(i => i.Type === 'Issue')
   const potIssues  = issuesBA.filter(i => i.Type === 'Potential Issue')
 
-  // BA chart data builders
-  const buildBAData = (rows, statusFn) => {
+  // BA chart data builders. When splitByType, each status becomes two stacked
+  // keys ("<status>_c" confirmed, "<status>_p" potential) so the bar chart can
+  // render the same solid/striped language as the Risk Rating card.
+  const buildBAData = (rows, statusFn, splitByType = false) => {
     const map = {}
     rows.forEach(r => {
       const ba = normalizeBA(r['Business Area'] || 'Unknown')
-      if (!map[ba]) map[ba] = { ba, 'On Track': 0, Late: 0, TBD: 0, 'In Validation': 0, total: 0 }
-      map[ba][statusFn(r)]++
+      if (!map[ba]) map[ba] = { ba, total: 0 }
+      const status = statusFn(r)
+      const key = splitByType ? `${status}_${r.Type === 'Potential Issue' ? 'p' : 'c'}` : status
+      map[ba][key] = (map[ba][key] || 0) + 1
       map[ba].total++
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
@@ -347,17 +398,9 @@ export default function OverviewTab({ issues, aps }) {
   const issuesForCharts = issues.filter(i => !selectedStatus || i.status === selectedStatus)
   const apsForCharts    = aps.filter(a => !selectedStatus || a.ap_status === selectedStatus)
 
-  const baIssuesData  = buildBAData(issuesForCharts.filter(i => i.Type === 'Issue'),           issueStatus)
-  const baPotData     = buildBAData(issuesForCharts.filter(i => i.Type === 'Potential Issue'), issueStatus)
-  const baAPsData     = buildBAData(apsForCharts,                                              apStatus)
-
-  // Status donuts (BA-filtered), split confirmed Issues vs Potential Issues
-  const countByStatus = rows => {
-    const acc = rows.reduce((m, i) => { m[i.status] = (m[i.status] || 0) + 1; return m }, {})
-    return Object.entries(acc).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
-  }
-  const donutDataIssues = countByStatus(issuesOnly)
-  const donutDataPot    = countByStatus(potIssues)
+  // Confirmed Issues + Potential Issues combined into one chart (split by type per status)
+  const baIssuesData  = buildBAData(issuesForCharts, issueStatus, true)
+  const baAPsData     = buildBAData(apsForCharts,    apStatus)
 
   // Rating (cross-filtered) — split confirmed Issues vs Potential Issues so a
   // scary rating (e.g. 1 Very High) doesn't alarm when it's only a potential issue
@@ -385,10 +428,10 @@ export default function OverviewTab({ issues, aps }) {
 
     // Build drilldown items
     let rows
-    if (chartType === 'Issue' || chartType === 'Potential Issue') {
+    if (chartType === 'Issue') {
       rows = issues
-        .filter(i => normalizeBA(i['Business Area']) === ba && i.Type === chartType)
-        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+        .filter(i => normalizeBA(i['Business Area']) === ba)
+        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
     } else {
       rows = aps
         .filter(a => normalizeBA(a['Business Area']) === ba)
@@ -436,53 +479,32 @@ export default function OverviewTab({ issues, aps }) {
           late={filteredAPs.filter(a => ['Pending Validation (late)','Pending Approval (late)'].includes(a.ap_status)).length} color="#D48000" icon="⏳" />
       </div>
 
-      {/* Row 1: Issues by BA | Status donut */}
+      {/* Row 1: Issues by BA (confirmed solid + potential striped) | Status donut + Risk Rating */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'start' }}>
-        <ChartCard title="Issues by Business Area" subtitle="Click a bar to filter and see items below">
+        <ChartCard title="Issues by Business Area" subtitle="Solid = confirmed · striped = potential · click a bar to filter">
           <ResponsiveContainer width="100%" height={Math.max(200, baIssuesData.length * 34)}>
             <BarChart data={baIssuesData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={d => handleBAClick(d, 'Issue')} style={{ cursor: 'pointer' }}>
+              <StripeDefs colors={Object.values(DONUT_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
               <YAxis {...BAYAxis({ selectedBA })} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="On Track"      stackId="a" fill="#007A57" opacity={barOp} />
-              <Bar dataKey="In Validation" stackId="a" fill="#1A6FCC" opacity={barOp} />
-              <Bar dataKey="TBD"           stackId="a" fill="#D48000" opacity={barOp} />
-              <Bar dataKey="Late"          stackId="a" fill="#E0002A" radius={[0,4,4,0]} opacity={barOp} />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
+                payload={Object.entries(DONUT_COLORS).map(([name, color]) => ({ value: name, type: 'rect', color }))} />
+              <Bar dataKey="On Track_c"      stackId="a" fill={DONUT_COLORS['On Track']}      opacity={barOp} legendType="none" />
+              <Bar dataKey="On Track_p"      stackId="a" fill={fillFor(DONUT_COLORS['On Track'], true)}      opacity={barOp} legendType="none" />
+              <Bar dataKey="In Validation_c" stackId="a" fill={DONUT_COLORS['In Validation']} opacity={barOp} legendType="none" />
+              <Bar dataKey="In Validation_p" stackId="a" fill={fillFor(DONUT_COLORS['In Validation'], true)} opacity={barOp} legendType="none" />
+              <Bar dataKey="TBD_c"           stackId="a" fill={DONUT_COLORS['TBD']}           opacity={barOp} legendType="none" />
+              <Bar dataKey="TBD_p"           stackId="a" fill={fillFor(DONUT_COLORS['TBD'], true)}           opacity={barOp} legendType="none" />
+              <Bar dataKey="Late_c"          stackId="a" fill={DONUT_COLORS['Late']}          opacity={barOp} legendType="none" />
+              <Bar dataKey="Late_p"          stackId="a" fill={fillFor(DONUT_COLORS['Late'], true)}          opacity={barOp} legendType="none" radius={[0,4,4,0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <StatusDonut donutData={donutDataIssues} selectedStatus={selectedStatus} onSelect={setSelectedStatus}
-            title="Issue Status" subtitle="Confirmed issues · click to filter all charts" height={170} />
-          <StatusDonut donutData={donutDataPot} selectedStatus={selectedStatus} onSelect={setSelectedStatus}
-            title="Potential Issue Status" subtitle="Potential issues · click to filter all charts" height={170} />
-        </div>
-      </div>
-
-      {/* Row 2: Potential Issues by BA | Rating */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'start' }}>
-        <ChartCard title="Potential Issues by Business Area" subtitle="Click a bar to filter and see items below">
-          {baPotData.length === 0
-            ? <div style={{ padding: '32px 0', textAlign: 'center', color: '#6B6B80', fontSize: 13 }}>No potential issues</div>
-            : <ResponsiveContainer width="100%" height={Math.max(200, baPotData.length * 34)}>
-                <BarChart data={baPotData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-                  onClick={d => handleBAClick(d, 'Potential Issue')} style={{ cursor: 'pointer' }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
-                  <YAxis {...BAYAxis({ selectedBA })} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="On Track"      stackId="a" fill="#007A57" opacity={barOp} />
-                  <Bar dataKey="In Validation" stackId="a" fill="#1A6FCC" opacity={barOp} />
-                  <Bar dataKey="TBD"           stackId="a" fill="#D48000" opacity={barOp} />
-                  <Bar dataKey="Late"          stackId="a" fill="#E0002A" radius={[0,4,4,0]} opacity={barOp} />
-                </BarChart>
-              </ResponsiveContainer>
-          }
-        </ChartCard>
+          <StatusDonut confirmedRows={issuesOnly} potentialRows={potIssues} selectedStatus={selectedStatus} onSelect={setSelectedStatus} />
 
         <ChartCard title="Issues by Risk Rating" subtitle="Filtered by active status & BA · Click a rating to see the issues"
           right={
@@ -537,9 +559,10 @@ export default function OverviewTab({ issues, aps }) {
             </span>
           </div>
         </ChartCard>
+        </div>
       </div>
 
-      {/* Row 3: Action Plans by BA */}
+      {/* Row 2: Action Plans by BA */}
       <div style={{ marginBottom: 16 }}>
         <ChartCard title="Action Plans by Business Area" subtitle="Click a bar to filter and see items below">
           <ResponsiveContainer width="100%" height={Math.max(200, baAPsData.length * 34)}>
