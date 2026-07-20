@@ -73,11 +73,13 @@ export default function TrendTab({ issues }) {
 
   const matchesType = d => typeFilter === 'Ambos' || d.type === typeFilter
 
-  /* Todas as issues (qualquer origem) criadas em cada mês, pra servir de denominador do % self */
-  const allByMonth = useMemo(() => {
+  /* Issues cuja origem NÃO é self-identified (External Parties, Regulator's finding, etc.),
+     criadas em cada mês — é contra isso que o self-identified precisa ser comparado */
+  const externalByMonth = useMemo(() => {
     const map = {}
     issues.forEach(r => {
       if (!r.created_at) return
+      if (SELF_ORIGINS.has((r.origin || '').trim())) return
       const type = (r.Type || '').trim() === 'Potential Issue' ? 'Potential Issue' : 'Issue'
       if (!matchesType({ type })) return
       const month = r.created_at.slice(0, 7)
@@ -94,11 +96,12 @@ export default function TrendTab({ issues }) {
     })
     return months.map(m => {
       const selfTotal = bas.reduce((s, b) => s + base[m][b], 0)
-      const allTotal = allByMonth[m] || 0
+      const externalTotal = externalByMonth[m] || 0
+      const allTotal = selfTotal + externalTotal
       const pctSelf = allTotal ? Math.round((selfTotal / allTotal) * 1000) / 10 : null
-      return { month: m, total: selfTotal, allTotal, pctSelf, ...base[m] }
+      return { month: m, total: selfTotal, externalTotal, allTotal, pctSelf, ...base[m] }
     })
-  }, [months, bas, selfIssues, typeFilter, allByMonth])
+  }, [months, bas, selfIssues, typeFilter, externalByMonth])
 
   const totals = useMemo(() => {
     const t = { Issue: 0, 'Potential Issue': 0 }
@@ -118,15 +121,17 @@ export default function TrendTab({ issues }) {
     const next = new Set(prev); next.has(ba) ? next.delete(ba) : next.add(ba); return next
   })
 
+  const LINE_KEYS = new Set(['pctSelf', 'externalTotal'])
+
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null
-    const rows = payload.filter(p => p.value > 0 && p.dataKey !== 'pctSelf').sort((a, b) => b.value - a.value)
+    const rows = payload.filter(p => p.value > 0 && !LINE_KEYS.has(p.dataKey)).sort((a, b) => b.value - a.value)
     const total = rows.reduce((s, p) => s + p.value, 0)
-    if (!total) return null
     const point = payload[0]?.payload
+    if (!total && !point?.externalTotal) return null
     return (
       <div style={{ ...tooltipStyle, padding: '8px 12px' }}>
-        <div style={{ fontWeight: 700, color: '#1A1A2E', marginBottom: 6 }}>{fmtMonth(label)} · {total} total</div>
+        <div style={{ fontWeight: 700, color: '#1A1A2E', marginBottom: 6 }}>{fmtMonth(label)} · {total} self-identified</div>
         {rows.map(p => (
           <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
             <span style={{ width: 9, height: 9, borderRadius: 2, background: p.color }} />
@@ -134,13 +139,19 @@ export default function TrendTab({ issues }) {
             <span style={{ fontWeight: 700, color: '#1A1A2E' }}>{p.value}</span>
           </div>
         ))}
-        {point?.pctSelf != null && (
-          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(0,0,0,0.08)',
-            display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <span style={{ color: '#8A05BE', fontWeight: 700 }}>% Self-identified</span>
-            <span style={{ fontWeight: 700, color: '#8A05BE' }}>{point.pctSelf}% ({point.total}/{point.allTotal})</span>
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: '#B0B0C0' }} />
+            <span style={{ color: '#6B6B80', flex: 1 }}>Externally-identified</span>
+            <span style={{ fontWeight: 700, color: '#1A1A2E' }}>{point?.externalTotal ?? 0}</span>
           </div>
-        )}
+          {point?.pctSelf != null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 4 }}>
+              <span style={{ color: '#8A05BE', fontWeight: 700 }}>% Self-identified</span>
+              <span style={{ fontWeight: 700, color: '#8A05BE' }}>{point.pctSelf}% ({point.total}/{point.allTotal})</span>
+            </div>
+          )}
+        </div>
         <div style={{ fontSize: 10, color: '#8A05BE', marginTop: 6 }}>clique para ver os issues ↓</div>
       </div>
     )
@@ -213,6 +224,8 @@ export default function TrendTab({ issues }) {
                 })}
               </Bar>
             ))}
+            <Line yAxisId="count" dataKey="externalTotal" name="Externally-identified" stroke="#B0B0C0" strokeWidth={2}
+              strokeDasharray="4 3" dot={{ r: 3, fill: '#B0B0C0' }} />
             <Line yAxisId="pct" dataKey="pctSelf" name="% Self-identified" stroke="#8A05BE" strokeWidth={2.5}
               dot={{ r: 3, fill: '#8A05BE' }} connectNulls />
           </ComposedChart>
