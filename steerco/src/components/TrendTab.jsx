@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+import { ComposedChart, Bar, Cell, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
          ResponsiveContainer } from 'recharts'
 import { IssueCard } from './LateIssues'
 
@@ -73,14 +73,32 @@ export default function TrendTab({ issues }) {
 
   const matchesType = d => typeFilter === 'Ambos' || d.type === typeFilter
 
+  /* Todas as issues (qualquer origem) criadas em cada mês, pra servir de denominador do % self */
+  const allByMonth = useMemo(() => {
+    const map = {}
+    issues.forEach(r => {
+      if (!r.created_at) return
+      const type = (r.Type || '').trim() === 'Potential Issue' ? 'Potential Issue' : 'Issue'
+      if (!matchesType({ type })) return
+      const month = r.created_at.slice(0, 7)
+      map[month] = (map[month] || 0) + 1
+    })
+    return map
+  }, [issues, typeFilter])
+
   const chartData = useMemo(() => {
     const base = Object.fromEntries(months.map(m => [m, Object.fromEntries(bas.map(b => [b, 0]))]))
     selfIssues.forEach(d => {
       if (!matchesType(d)) return
       if (base[d.month]) base[d.month][d.ba]++
     })
-    return months.map(m => ({ month: m, total: bas.reduce((s, b) => s + base[m][b], 0), ...base[m] }))
-  }, [months, bas, selfIssues, typeFilter])
+    return months.map(m => {
+      const selfTotal = bas.reduce((s, b) => s + base[m][b], 0)
+      const allTotal = allByMonth[m] || 0
+      const pctSelf = allTotal ? Math.round((selfTotal / allTotal) * 1000) / 10 : null
+      return { month: m, total: selfTotal, allTotal, pctSelf, ...base[m] }
+    })
+  }, [months, bas, selfIssues, typeFilter, allByMonth])
 
   const totals = useMemo(() => {
     const t = { Issue: 0, 'Potential Issue': 0 }
@@ -102,9 +120,10 @@ export default function TrendTab({ issues }) {
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null
-    const rows = payload.filter(p => p.value > 0).sort((a, b) => b.value - a.value)
+    const rows = payload.filter(p => p.value > 0 && p.dataKey !== 'pctSelf').sort((a, b) => b.value - a.value)
     const total = rows.reduce((s, p) => s + p.value, 0)
     if (!total) return null
+    const point = payload[0]?.payload
     return (
       <div style={{ ...tooltipStyle, padding: '8px 12px' }}>
         <div style={{ fontWeight: 700, color: '#1A1A2E', marginBottom: 6 }}>{fmtMonth(label)} · {total} total</div>
@@ -115,6 +134,13 @@ export default function TrendTab({ issues }) {
             <span style={{ fontWeight: 700, color: '#1A1A2E' }}>{p.value}</span>
           </div>
         ))}
+        {point?.pctSelf != null && (
+          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(0,0,0,0.08)',
+            display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ color: '#8A05BE', fontWeight: 700 }}>% Self-identified</span>
+            <span style={{ fontWeight: 700, color: '#8A05BE' }}>{point.pctSelf}% ({point.total}/{point.allTotal})</span>
+          </div>
+        )}
         <div style={{ fontSize: 10, color: '#8A05BE', marginTop: 6 }}>clique para ver os issues ↓</div>
       </div>
     )
@@ -160,15 +186,18 @@ export default function TrendTab({ issues }) {
           Cada cor é uma Business Area · <b style={{ color: '#8A05BE' }}>clique numa barra para ver os issues</b> · clique na legenda para ocultar/mostrar
         </div>
         <ResponsiveContainer width="100%" height={420}>
-          <BarChart data={chartData} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
+          <ComposedChart data={chartData} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EEE" />
             <XAxis dataKey="month" tickFormatter={fmtMonth} tick={{ fontSize: 11, fill: '#6B6B80' }}
               interval={0} angle={-35} textAnchor="end" height={50} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6B6B80' }} />
+            <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 11, fill: '#6B6B80' }} />
+            <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`}
+              tick={{ fontSize: 11, fill: '#8A05BE' }} axisLine={false} tickLine={false} />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: '#8A05BE0A' }} />
-            <Legend onClick={e => toggleBA(e.dataKey)} wrapperStyle={{ fontSize: 11, cursor: 'pointer', paddingTop: 8 }} />
+            <Legend onClick={e => e.dataKey !== 'pctSelf' && toggleBA(e.dataKey)}
+              wrapperStyle={{ fontSize: 11, cursor: 'pointer', paddingTop: 8 }} />
             {bas.map(ba => (
-              <Bar key={ba} dataKey={ba} stackId="ba" hide={hiddenBAs.has(ba)} maxBarSize={48}
+              <Bar key={ba} yAxisId="count" dataKey={ba} stackId="ba" hide={hiddenBAs.has(ba)} maxBarSize={48}
                 cursor="pointer"
                 onClick={(entry) => setSelected(
                   selected && selected.month === entry.month && selected.ba === ba
@@ -184,7 +213,9 @@ export default function TrendTab({ issues }) {
                 })}
               </Bar>
             ))}
-          </BarChart>
+            <Line yAxisId="pct" dataKey="pctSelf" name="% Self-identified" stroke="#8A05BE" strokeWidth={2.5}
+              dot={{ r: 3, fill: '#8A05BE' }} connectNulls />
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
 
