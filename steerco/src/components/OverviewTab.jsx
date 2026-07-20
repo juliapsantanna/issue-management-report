@@ -209,7 +209,7 @@ function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, t
 /* ─── Custom tooltip for the stacked BA bar chart (readable status + I/P labels) ── */
 function BATooltip({ active, payload, label, colorMap = DONUT_COLORS }) {
   if (!active || !payload?.length) return null
-  const rows = payload.filter(p => p.value > 0)
+  const rows = payload.filter(p => p.value > 0 && p.dataKey !== '_hit')
   if (!rows.length) return null
   return (
     <div style={{ ...tooltipStyle, padding: '8px 12px' }}>
@@ -485,6 +485,10 @@ export default function OverviewTab({ issues, aps }) {
         rows.push({ ...s, rowKey: `sub:${s.subcategory}`, label: s.subcategory, isHeader: false })
       })
     })
+    // Full-width transparent hit area so the whole row is clickable, not just the
+    // (often tiny) colored segment — matches the max total across all rows.
+    const maxTotal = rows.reduce((m, r) => Math.max(m, r.total), 0)
+    rows.forEach(r => { r._hit = maxTotal })
     return rows
   })()
 
@@ -521,8 +525,7 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [filteredIssues])
 
-  const handleCombinedClick = useCallback((data) => {
-    const row = data?.activePayload?.[0]?.payload
+  const handleCombinedRow = useCallback((row) => {
     if (!row) return
     if (row.isHeader) {
       const origin = row.origin
@@ -543,6 +546,10 @@ export default function OverviewTab({ issues, aps }) {
     }
   }, [filteredIssues])
 
+  const handleCombinedClick = useCallback((data) => {
+    handleCombinedRow(data?.activePayload?.[0]?.payload)
+  }, [handleCombinedRow])
+
   const barOp = ba => (!selectedBA || selectedBA === ba) ? 1 : 0.3
 
   const BAYAxis = ({ selectedBA }) => ({
@@ -559,13 +566,15 @@ export default function OverviewTab({ issues, aps }) {
     const label = row.label.length > 32 ? `${row.label.slice(0, 31)}…` : row.label
     return row.isHeader
       ? (
-        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={500} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}>
+        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={500} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}
+          onClick={() => handleCombinedRow(row)} style={{ cursor: 'pointer' }}>
           {label}
           <tspan fill="#6B6B80" fontWeight={400} fontSize={10.5}> ({row.total} · {pct}%)</tspan>
         </text>
       )
       : (
-        <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#6B6B80">
+        <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#6B6B80"
+          onClick={() => handleCombinedRow(row)} style={{ cursor: 'pointer' }}>
           {label}
           <tspan fill="#9B9BAA" fontSize={9.5}> ({row.total} · {pct}%)</tspan>
         </text>
@@ -701,6 +710,8 @@ export default function OverviewTab({ issues, aps }) {
               <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
+              {/* Transparent full-width hit area so the whole row is clickable, even past a thin bar */}
+              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} />
               {RATINGS_ORDER.flatMap(name => [
                 <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
                 <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
