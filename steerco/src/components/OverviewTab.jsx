@@ -524,9 +524,22 @@ export default function OverviewTab({ issues, aps }) {
     tick: props => <BAYTick {...props} selectedBA={selectedBA} />
   })
 
+  const originGrandTotal = originData.reduce((s, d) => s + d.total, 0)
+
+  const OriginYTick = ({ x, y, payload }) => {
+    const row = originData.find(d => d.origin === payload.value)
+    const pct = row && originGrandTotal ? Math.round((row.total / originGrandTotal) * 100) : 0
+    return (
+      <text x={x} y={y} dy={4} textAnchor="end" fontSize={12} fill="#1A1A2E">
+        {payload.value}
+        <tspan fill="#6B6B80" fontSize={10}> ({row?.total ?? 0} · {pct}%)</tspan>
+      </text>
+    )
+  }
+
   const OriginYAxis = {
-    type: 'category', dataKey: 'origin', width: 160, axisLine: false, tickLine: false, interval: 0,
-    tick: { fontSize: 12, fill: '#1A1A2E' }
+    type: 'category', dataKey: 'origin', width: 200, axisLine: false, tickLine: false, interval: 0,
+    tick: OriginYTick
   }
 
   return (
@@ -635,7 +648,13 @@ export default function OverviewTab({ issues, aps }) {
 
       {/* Row 1.5: Issues by Origin, correlated with Risk Rating (same solid/striped language) */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = confirmed · striped = potential · click a bar to see the issues">
+        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = confirmed · striped = potential · click a bar to see the issues"
+          right={
+            <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
+              fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {originGrandTotal} total
+            </span>
+          }>
           <ResponsiveContainer width="100%" height={Math.max(160, originData.length * 40)}>
             <BarChart data={originData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={handleOriginClick} style={{ cursor: 'pointer' }}>
