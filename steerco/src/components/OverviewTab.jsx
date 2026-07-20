@@ -215,10 +215,11 @@ function FilterPill({ label, color, onClear }) {
 }
 
 /* ─── Chart wrapper ───────────────────────────────────────────────────────── */
-function ChartCard({ title, subtitle, right, children }) {
+function ChartCard({ title, subtitle, right, children, fill }) {
   return (
     <div style={{ background: '#fff', borderRadius: 16, padding: '20px 24px',
-      boxShadow: '0 1px 6px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.06)' }}>
+      boxShadow: '0 1px 6px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.06)',
+      height: fill ? '100%' : undefined, display: fill ? 'flex' : undefined, flexDirection: fill ? 'column' : undefined }}>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{title}</div>
@@ -226,7 +227,7 @@ function ChartCard({ title, subtitle, right, children }) {
         </div>
         {right}
       </div>
-      {children}
+      {fill ? <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>{children}</div> : children}
     </div>
   )
 }
@@ -480,8 +481,8 @@ export default function OverviewTab({ issues, aps }) {
       </div>
 
       {/* Row 1: Issues by BA (confirmed solid + potential striped) | Status donut + Risk Rating */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'start' }}>
-        <ChartCard title="Issues by Business Area" subtitle="Solid = confirmed · striped = potential · click a bar to filter">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'stretch' }}>
+        <ChartCard title="Issues by Business Area" subtitle="Solid = confirmed · striped = potential · click a bar to filter" fill>
           <ResponsiveContainer width="100%" height={Math.max(200, baIssuesData.length * 34)}>
             <BarChart data={baIssuesData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={d => handleBAClick(d, 'Issue')} style={{ cursor: 'pointer' }}>
@@ -551,7 +552,7 @@ export default function OverviewTab({ issues, aps }) {
           </div>
           <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10.5, color: '#6B6B80', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 16, height: 8, borderRadius: 2, background: '#6B6B80', display: 'inline-block' }} /> Confirmed issue
+              <span style={{ width: 16, height: 8, borderRadius: 2, background: '#6B6B80', display: 'inline-block' }} /> Issue
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               <span style={{ width: 16, height: 8, borderRadius: 2, display: 'inline-block',
