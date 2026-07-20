@@ -611,7 +611,7 @@ export default function OverviewTab({ issues, aps }) {
 
       {/* Row 1: Issues by BA (confirmed solid + potential striped) | Status donut + Risk Rating */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginBottom: 16, alignItems: 'stretch' }}>
-        <ChartCard title="Issues by Business Area" subtitle="Solid = issue · striped = potential · click a bar to filter" fill>
+        <ChartCard title="Issues by Business Area" subtitle="click a bar to filter" fill>
           <ResponsiveContainer width="100%" height={Math.max(200, baIssuesData.length * 34)}>
             <BarChart data={baIssuesData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
               onClick={d => handleBAClick(d, 'Issue')} style={{ cursor: 'pointer' }}>
@@ -695,7 +695,7 @@ export default function OverviewTab({ issues, aps }) {
 
       {/* Row 1.5: Issues by Origin, correlated with Risk Rating (same solid/striped language) */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Risk Rating" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
+        <ChartCard title="Issues by Origin & Risk Rating" subtitle="click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -726,7 +726,7 @@ export default function OverviewTab({ issues, aps }) {
       {/* Row 1.6: Issues by Subcategory, correlated with Origin (ties back into the Origin
           & Risk Rating chart above instead of repeating the rating split) */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Subcategory & Origin" subtitle="Solid = issue · striped = potential · click a bar to see the issues"
+        <ChartCard title="Issues by Subcategory & Origin" subtitle="click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
