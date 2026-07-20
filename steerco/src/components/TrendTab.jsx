@@ -13,8 +13,9 @@ const BA_ALIASES = {
 }
 const normalizeBA = ba => BA_ALIASES[ba] || ba || 'TBD'
 
-/* Origins que contam como "self-identified" (def. oficial MOR KPI) */
-const SELF_ORIGINS = new Set(['Self-Identified', 'Defense Assessment', 'Internal Audit'])
+/* Strictly origin = 'Self-Identified' — Defense Assessment, External Parties and
+   Regulator's Finding are the comparison bucket (matches the %SII gauge in MORKPIs.jsx) */
+const SELF_ORIGINS = new Set(['Self-Identified'])
 
 /* Paleta determinística por BA */
 const BA_PALETTE = ['#8A05BE', '#1A6FCC', '#007A57', '#D48000', '#E0002A',
@@ -172,7 +173,7 @@ export default function TrendTab({ issues }) {
           <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E' }}>Self-Identified Issues by Month</div>
           <div style={{ fontSize: 13, color: '#6B6B80', marginTop: 4 }}>
             {selfIssues.length} active issues · {totals.Issue} Issues · {totals['Potential Issue']} Potential ·
-            {' '}{bas.length} Business Areas · origin: Self-Identified + Defense Assessment + Internal Audit
+            {' '}{bas.length} Business Areas · origin: Self-Identified only
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>

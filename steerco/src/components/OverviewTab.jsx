@@ -125,7 +125,7 @@ function ActiveShape({ cx, cy, innerRadius, outerRadius, startAngle, endAngle, f
    Renders one wedge per status (solid) immediately followed by a striped
    wedge for its potential-issue share — same "riscadinho" language as the
    Risk Rating bars, but merged into a single donut instead of two. */
-function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, title = 'Issue Status', subtitle = 'Solid = confirmed · striped = potential · click to filter', height = 220 }) {
+function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, title = 'Issue Status', subtitle = 'click to filter', height = 220 }) {
   const [activeIndex, setActiveIndex] = useState(null)
 
   const statusNames = [...new Set([...confirmedRows.map(r => r.status), ...potentialRows.map(r => r.status)])]
@@ -197,9 +197,7 @@ function StatusDonut({ confirmedRows, potentialRows, selectedStatus, onSelect, t
           )
         })}
       </div>
-      <div style={{ textAlign: 'center', marginTop: 4, fontSize: 10.5, color: '#6B6B80' }}>
-        I = Issue · P = Potential issue
-      </div>
+      <IssueTypeLegend />
       </>
       }
     </div>
