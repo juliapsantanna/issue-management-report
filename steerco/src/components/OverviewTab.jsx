@@ -559,7 +559,7 @@ export default function OverviewTab({ issues, aps }) {
     const label = row.label.length > 32 ? `${row.label.slice(0, 31)}…` : row.label
     return row.isHeader
       ? (
-        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={700} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}>
+        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={500} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}>
           {label}
           <tspan fill="#6B6B80" fontWeight={400} fontSize={10.5}> ({row.total} · {pct}%)</tspan>
         </text>
@@ -684,7 +684,7 @@ export default function OverviewTab({ issues, aps }) {
       {/* Row 1.5: Issues by Origin > Subcategory, stacked by Risk Rating — bold Origin
           header bars, each followed by its own Subcategory breakdown rows */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Subcategory" subtitle="bold = Origin total · click a bar to see the issues"
+        <ChartCard title="Issues by Origin & Subcategory" subtitle="click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -702,13 +702,9 @@ export default function OverviewTab({ issues, aps }) {
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
               {RATINGS_ORDER.flatMap(name => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none">
-                  {combinedOriginData.map(d => <Cell key={d.rowKey} fillOpacity={d.isHeader ? 1 : 0.75} />)}
-                </Bar>,
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
                 <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
-                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined}>
-                  {combinedOriginData.map(d => <Cell key={d.rowKey} fillOpacity={d.isHeader ? 1 : 0.75} />)}
-                </Bar>,
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
               ])}
             </BarChart>
           </ResponsiveContainer>
