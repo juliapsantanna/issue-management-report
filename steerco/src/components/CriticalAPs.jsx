@@ -8,6 +8,34 @@ const STATUS_META = {
   'Pending Approval':          { color: '#1A6FCC', label: 'Pending Approval',          icon: '🔵' },
 }
 
+// Margin (in days) between the parent issue's max due date and this AP's own
+// due date: positive = AP finishes before the issue's deadline (buffer),
+// negative = AP is planned to finish after it (no margin).
+function dueDateMargin(issueDue, apDue) {
+  if (!issueDue || !apDue) return null
+  const a = new Date(`${issueDue}T00:00:00`)
+  const b = new Date(`${apDue}T00:00:00`)
+  if (isNaN(a) || isNaN(b)) return null
+  return Math.round((a - b) / 86400000)
+}
+
+function DueDateMargin({ ap }) {
+  const issueDue = ap.issue_due_date_at?.slice(0, 10)
+  const apDue    = ap.ap_due_date_at?.slice(0, 10)
+  const margin   = dueDateMargin(issueDue, apDue)
+  if (margin === null) return null
+
+  const overrun = margin < 0
+  const color   = overrun ? '#9B0020' : '#6B6B80'
+  const text    = overrun
+    ? `⚠️ ${Math.abs(margin)}d past issue's max due date (no margin)`
+    : `${margin}d margin before issue's max due date`
+
+  return (
+    <div style={{ fontSize: 11, color, marginTop: 4, fontWeight: overrun ? 700 : 400 }}>{text}</div>
+  )
+}
+
 function PresentationNotes({ noteKey }) {
   const storageKey = `presentation-note-${noteKey}`
   const [note, setNote]       = useState(() => localStorage.getItem(storageKey) || '')
@@ -99,6 +127,7 @@ function APCard({ ap }) {
           <div style={{ fontSize: 11, color: '#6B6B80' }}>Action Owner</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#D48000' }}>{ap['Action Owner'] || '—'}</div>
           <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 4 }}>Due: {ap.ap_due_date_at?.slice(0,10) || '—'}</div>
+          <DueDateMargin ap={ap} />
         </div>
       </div>
     </div>

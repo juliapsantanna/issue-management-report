@@ -624,7 +624,7 @@ def run():
         'process_journey_macroprocess__name', 'overall_risk_rating', 'origin',
         'subcategory', 'residual_risk_level', 'responsible_name', 'accountable_name',
         'business_units', 'Action', 'Action Owner', 'Action Owner Email',
-        'Action Pending From', 'Business Area', 'Risk L1', 'Risk L2',
+        'Action Pending From', 'Business Area', 'Risk L1', 'Risk L2', 'AP Due Date',
     ]
 
     TERMINAL_ISSUE_STATUSES = {'Risk Accepted', 'Cancelled', 'Done', 'Completed'}
@@ -663,6 +663,17 @@ def run():
         origin   = safe(row.get('origin', ''))
         reporter = safe(row.get('reporter_name', ''))
 
+        # AP mais urgente — buscado sempre, para expor o AP Due Date (margem vs.
+        # max due date do issue) independente de qual branch decide a Action
+        ap_list = ap_index.get(code, [])
+        if ap_list:
+            best        = best_ap(ap_list)
+            ap_status   = safe(best.get('ap_status', ''))
+            ap_assignee = safe(best.get('ap_assignee_name', ''))
+            ap_due      = safe(best.get('ap_due_date_at', ''))
+        else:
+            ap_status, ap_assignee, ap_due = '', '', ''
+
         # Prioridade: status do issue determina a ação antes de consultar APs
         if issue_status == 'TBD':
             action       = 'Create AP'
@@ -680,16 +691,6 @@ def run():
             else:
                 action_owner = reporter
         else:
-            # AP mais urgente
-            ap_list = ap_index.get(code, [])
-            if ap_list:
-                best        = best_ap(ap_list)
-                ap_status   = safe(best.get('ap_status', ''))
-                ap_assignee = safe(best.get('ap_assignee_name', ''))
-                ap_due      = safe(best.get('ap_due_date_at', ''))
-            else:
-                ap_status, ap_assignee, ap_due = '', '', ''
-
             action, action_owner = compute_action_issue(
                 ap_status, ap_due, ap_assignee,
                 origin,
@@ -715,6 +716,7 @@ def run():
         out['Business Area']       = normalize_ba(ba)
         out['Risk L1']             = clean_array(row.get('risk_categories', ''))
         out['Risk L2']             = clean_array(row.get('risk_categories_l2', ''))
+        out['AP Due Date']         = ap_due
         issues_output.append(out)
 
     # ── 5. Enriquecer Action Plans ─────────────────────────────────────────────

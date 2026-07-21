@@ -17,6 +17,35 @@ function lateReasonBadge(issue) {
   return <Badge text={reason.text} color={reason.color} />
 }
 
+// Margin (in days) between the issue's max due date and the AP's own due
+// date: positive = AP finishes before the issue's deadline (buffer), negative
+// = AP is planned to finish after it (no margin, deadline will be breached
+// regardless of the AP's own status).
+function dueDateMargin(issueDue, apDue) {
+  if (!issueDue || !apDue) return null
+  const a = new Date(`${issueDue}T00:00:00`)
+  const b = new Date(`${apDue}T00:00:00`)
+  if (isNaN(a) || isNaN(b)) return null
+  return Math.round((a - b) / 86400000)
+}
+
+function DueDateMargin({ issue }) {
+  const issueDue = issue.due_date_at?.slice(0, 10)
+  const apDue    = issue['AP Due Date']?.slice(0, 10)
+  const margin   = dueDateMargin(issueDue, apDue)
+  if (margin === null) return null
+
+  const overrun = margin < 0
+  const color   = overrun ? '#9B0020' : '#6B6B80'
+  const text    = overrun
+    ? `⚠️ AP due ${apDue} — ${Math.abs(margin)}d past issue's max due date (no margin)`
+    : `AP due ${apDue} — ${margin}d margin before issue's max due date`
+
+  return (
+    <div style={{ fontSize: 11, color, marginTop: 4, fontWeight: overrun ? 700 : 400 }}>{text}</div>
+  )
+}
+
 function Badge({ text, color }) {
   if (!text) return null
   return (
@@ -129,6 +158,7 @@ export function IssueCard({ issue, borderColor }) {
           <div style={{ fontSize: 11, color: '#6B6B80' }}>Action Owner</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#D48000' }}>{issue['Action Owner'] || '—'}</div>
           <div style={{ fontSize: 11, color: '#6B6B80', marginTop: 4 }}>Due: {issue.due_date_at?.slice(0,10) || '—'}</div>
+          <DueDateMargin issue={issue} />
         </div>
       </div>
     </div>
