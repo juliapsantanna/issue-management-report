@@ -2,6 +2,21 @@ import { useState, useEffect } from 'react'
 
 const RATING_COLOR = { 'Very High': '#9B0020', High: '#E0002A', Medium: '#D48000', Low: '#1A6FCC' }
 
+// Distinguishes *why* an issue is late: no AP has been created yet vs. an AP
+// exists but is itself overdue (or stuck pending approval/validation).
+const LATE_REASON = {
+  'Create AP':                        { text: '⛔ No Action Plan',        color: '#9B0020' },
+  'AP Late: Replan/Complete AP':       { text: '🔴 AP Overdue',            color: '#E0002A' },
+  'Complete AP Pending Approval':      { text: '⏳ AP Pending Approval',   color: '#D48000' },
+  'Complete AP Pending Validation':    { text: '⏳ AP Pending Validation', color: '#D48000' },
+}
+
+function lateReasonBadge(issue) {
+  const reason = LATE_REASON[issue.Action]
+  if (!reason) return null
+  return <Badge text={reason.text} color={reason.color} />
+}
+
 function Badge({ text, color }) {
   if (!text) return null
   return (
@@ -104,6 +119,7 @@ export function IssueCard({ issue, borderColor }) {
             <Badge text={issue.overall_risk_rating} color={RATING_COLOR[issue.overall_risk_rating] || '#888'} />
             <Badge text={issue['Business Area'] || 'N/A'} color="#1A6FCC" />
             <Badge text={issue.countries?.replace(/[\[\]"]/g, '') || ''} color="#6B6B80" />
+            {lateReasonBadge(issue)}
           </div>
           <PresentationNotes noteKey={issue.code} />
         </div>
