@@ -458,33 +458,20 @@ export default function OverviewTab({ issues, aps }) {
     }
   })
 
-  // Origin > Subcategory, stacked by Risk Rating — a single hierarchical chart:
-  // one bold header bar per Origin (its Risk Rating breakdown), immediately followed
-  // by its Subcategory rows (smaller, indented) so Origin and Subcategory read as one
-  // correlated view instead of two separate charts that didn't visually line up.
+  // Origin, stacked by Risk Rating — one bar per Origin.
   const combinedOriginData = (() => {
     const originMap = {}
     filteredIssues.forEach(r => {
       const origin = (r.origin || '').trim() || 'Unknown'
-      const subcategory = (r.subcategory || '').trim() || 'Unknown'
       const rating = RATINGS_ORDER.includes(r.overall_risk_rating) ? r.overall_risk_rating : 'Low'
       const key = `${rating}_${r.Type === 'Potential Issue' ? 'p' : 'c'}`
-      if (!originMap[origin]) originMap[origin] = { origin, total: 0, subs: {} }
+      if (!originMap[origin]) originMap[origin] = { origin, total: 0 }
       originMap[origin][key] = (originMap[origin][key] || 0) + 1
       originMap[origin].total++
-      if (!originMap[origin].subs[subcategory]) originMap[origin].subs[subcategory] = { origin, subcategory, total: 0 }
-      originMap[origin].subs[subcategory][key] = (originMap[origin].subs[subcategory][key] || 0) + 1
-      originMap[origin].subs[subcategory].total++
     })
 
-    const rows = []
-    Object.values(originMap).sort((a, b) => b.total - a.total).forEach(o => {
-      const { subs, ...originFields } = o
-      rows.push({ ...originFields, rowKey: `origin:${o.origin}`, label: o.origin, isHeader: true })
-      Object.values(subs).sort((a, b) => b.total - a.total).forEach(s => {
-        rows.push({ ...s, rowKey: `sub:${s.subcategory}`, label: s.subcategory, isHeader: false })
-      })
-    })
+    const rows = Object.values(originMap).sort((a, b) => b.total - a.total)
+      .map(o => ({ ...o, rowKey: `origin:${o.origin}`, label: o.origin, isHeader: true }))
     // Full-width transparent hit area so the whole row is clickable, not just the
     // (often tiny) colored segment — matches the max total across all rows.
     const maxTotal = rows.reduce((m, r) => Math.max(m, r.total), 0)
@@ -494,9 +481,9 @@ export default function OverviewTab({ issues, aps }) {
 
   const [chartDrilldown, setChartDrilldown] = useState(null) // { ba, type, items }
 
-  const handleBAClick = useCallback((data, chartType) => {
-    if (!data?.activePayload?.[0]?.payload?.ba) return
-    const ba = data.activePayload[0].payload.ba
+  const handleBARow = useCallback((row, chartType) => {
+    if (!row?.ba) return
+    const ba = row.ba
     setSelectedBA(prev => prev === ba ? null : ba)
 
     // Build drilldown items
@@ -516,6 +503,13 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [issues, aps])
 
+  // recharts@3 dropped `activePayload` from the chart-level onClick event, so the
+  // chart-level onClick can no longer resolve a row. Bar-level onClick still gets
+  // the row directly via `data.payload` — use that instead.
+  const handleBABarClick = useCallback((data, chartType) => {
+    handleBARow(data?.payload, chartType)
+  }, [handleBARow])
+
   const handleRatingClick = useCallback((rating, color) => {
     const rows = filteredIssues
       .filter(i => i.overall_risk_rating === rating)
@@ -527,27 +521,20 @@ export default function OverviewTab({ issues, aps }) {
 
   const handleCombinedRow = useCallback((row) => {
     if (!row) return
-    if (row.isHeader) {
-      const origin = row.origin
-      const rows = filteredIssues
-        .filter(i => ((i.origin || '').trim() || 'Unknown') === origin)
-        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
-      setChartDrilldown(prev =>
-        prev?.origin === origin && !prev?.subcategory ? null : { origin, title: `${origin} — Origin`, items: rows }
-      )
-    } else {
-      const subcategory = row.subcategory
-      const rows = filteredIssues
-        .filter(i => ((i.subcategory || '').trim() || 'Unknown') === subcategory)
-        .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
-      setChartDrilldown(prev =>
-        prev?.subcategory === subcategory ? null : { subcategory, title: `${subcategory} — Subcategory (${row.origin})`, items: rows }
-      )
-    }
+    const origin = row.origin
+    const rows = filteredIssues
+      .filter(i => ((i.origin || '').trim() || 'Unknown') === origin)
+      .map(i => ({ code: i.code, summary: i.summary, link: i.projac_link, status: i.status, rating: i.overall_risk_rating, type: i.Type, dueDate: i.due_date_at, npf: i['NP&F+'] }))
+    setChartDrilldown(prev =>
+      prev?.origin === origin ? null : { origin, title: `${origin} — Origin`, items: rows }
+    )
   }, [filteredIssues])
 
-  const handleCombinedClick = useCallback((data) => {
-    handleCombinedRow(data?.activePayload?.[0]?.payload)
+  // recharts@3 dropped `activePayload` from the chart-level onClick event, so the
+  // chart-level onClick can no longer resolve a row. Bar-level onClick still gets
+  // the row directly via `data.payload` — use that instead.
+  const handleCombinedBarClick = useCallback((data) => {
+    handleCombinedRow(data?.payload)
   }, [handleCombinedRow])
 
   // Risk Dictionary (L2) — which risk category shows up most often. Field is a
@@ -592,8 +579,8 @@ export default function OverviewTab({ issues, aps }) {
     )
   }, [filteredIssues])
 
-  const handleRiskClick = useCallback((data) => {
-    handleRiskRow(data?.activePayload?.[0]?.payload)
+  const handleRiskBarClick = useCallback((data) => {
+    handleRiskRow(data?.payload)
   }, [handleRiskRow])
 
   const RiskYTick = ({ x, y, payload }) => {
@@ -622,28 +609,20 @@ export default function OverviewTab({ issues, aps }) {
     tick: props => <BAYTick {...props} selectedBA={selectedBA} />
   })
 
-  const combinedGrandTotal = combinedOriginData.filter(d => d.isHeader).reduce((s, d) => s + d.total, 0)
+  const combinedGrandTotal = combinedOriginData.reduce((s, d) => s + d.total, 0)
 
   const CombinedYTick = ({ x, y, payload }) => {
     const row = combinedOriginData.find(d => d.label === payload.value)
     if (!row) return null
     const pct = combinedGrandTotal ? Math.round((row.total / combinedGrandTotal) * 100) : 0
     const label = row.label.length > 32 ? `${row.label.slice(0, 31)}…` : row.label
-    return row.isHeader
-      ? (
-        <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={500} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}
-          onClick={() => handleCombinedRow(row)} style={{ cursor: 'pointer' }}>
-          {label}
-          <tspan fill="#6B6B80" fontWeight={400} fontSize={10.5}> ({row.total} · {pct}%)</tspan>
-        </text>
-      )
-      : (
-        <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#6B6B80"
-          onClick={() => handleCombinedRow(row)} style={{ cursor: 'pointer' }}>
-          {label}
-          <tspan fill="#9B9BAA" fontSize={9.5}> ({row.total} · {pct}%)</tspan>
-        </text>
-      )
+    return (
+      <text x={x} y={y} dy={4} textAnchor="end" fontSize={12.5} fontWeight={500} fill={ORIGIN_COLORS[row.origin] || '#1A1A2E'}
+        onClick={() => handleCombinedRow(row)} style={{ cursor: 'pointer' }}>
+        {label}
+        <tspan fill="#6B6B80" fontWeight={400} fontSize={10.5}> ({row.total} · {pct}%)</tspan>
+      </text>
+    )
   }
 
   const CombinedYAxis = {
@@ -676,7 +655,7 @@ export default function OverviewTab({ issues, aps }) {
         <ChartCard title="Issues by Business Area" subtitle="click a bar to filter" fill>
           <ResponsiveContainer width="100%" height={Math.max(200, baIssuesData.length * 34)}>
             <BarChart data={baIssuesData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={d => handleBAClick(d, 'Issue')} style={{ cursor: 'pointer' }}>
+              style={{ cursor: 'pointer' }}>
               <StripeDefs colors={Object.values(DONUT_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
@@ -684,14 +663,14 @@ export default function OverviewTab({ issues, aps }) {
               <Tooltip contentStyle={tooltipStyle} content={<BATooltip />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={Object.entries(DONUT_COLORS).map(([name, color]) => ({ value: name, type: 'rect', color }))} />
-              <Bar dataKey="On Track_c"      stackId="a" fill={DONUT_COLORS['On Track']}      opacity={barOp} legendType="none" />
-              <Bar dataKey="On Track_p"      stackId="a" fill={fillFor(DONUT_COLORS['On Track'], true)}      opacity={barOp} legendType="none" />
-              <Bar dataKey="In Validation_c" stackId="a" fill={DONUT_COLORS['In Validation']} opacity={barOp} legendType="none" />
-              <Bar dataKey="In Validation_p" stackId="a" fill={fillFor(DONUT_COLORS['In Validation'], true)} opacity={barOp} legendType="none" />
-              <Bar dataKey="TBD_c"           stackId="a" fill={DONUT_COLORS['TBD']}           opacity={barOp} legendType="none" />
-              <Bar dataKey="TBD_p"           stackId="a" fill={fillFor(DONUT_COLORS['TBD'], true)}           opacity={barOp} legendType="none" />
-              <Bar dataKey="Late_c"          stackId="a" fill={DONUT_COLORS['Late']}          opacity={barOp} legendType="none" />
-              <Bar dataKey="Late_p"          stackId="a" fill={fillFor(DONUT_COLORS['Late'], true)}          opacity={barOp} legendType="none" radius={[0,4,4,0]} />
+              <Bar dataKey="On Track_c"      stackId="a" fill={DONUT_COLORS['On Track']}      opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="On Track_p"      stackId="a" fill={fillFor(DONUT_COLORS['On Track'], true)}      opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="In Validation_c" stackId="a" fill={DONUT_COLORS['In Validation']} opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="In Validation_p" stackId="a" fill={fillFor(DONUT_COLORS['In Validation'], true)} opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="TBD_c"           stackId="a" fill={DONUT_COLORS['TBD']}           opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="TBD_p"           stackId="a" fill={fillFor(DONUT_COLORS['TBD'], true)}           opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="Late_c"          stackId="a" fill={DONUT_COLORS['Late']}          opacity={barOp} legendType="none" onClick={d => handleBABarClick(d, 'Issue')} />
+              <Bar dataKey="Late_p"          stackId="a" fill={fillFor(DONUT_COLORS['Late'], true)}          opacity={barOp} legendType="none" radius={[0,4,4,0]} onClick={d => handleBABarClick(d, 'Issue')} />
             </BarChart>
           </ResponsiveContainer>
           <IssueTypeLegend />
@@ -755,10 +734,9 @@ export default function OverviewTab({ issues, aps }) {
         </div>
       </div>
 
-      {/* Row 1.5: Issues by Origin > Subcategory, stacked by Risk Rating — bold Origin
-          header bars, each followed by its own Subcategory breakdown rows */}
+      {/* Row 1.5: Issues by Origin, stacked by Risk Rating */}
       <div style={{ marginBottom: 16 }}>
-        <ChartCard title="Issues by Origin & Subcategory" subtitle="click a bar to see the issues"
+        <ChartCard title="Issues by Origin" subtitle="click a bar to see the issues"
           right={
             <span style={{ background: '#F0EDF5', color: '#1A1A2E', borderRadius: 20, padding: '4px 12px',
               fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -767,7 +745,7 @@ export default function OverviewTab({ issues, aps }) {
           }>
           <ResponsiveContainer width="100%" height={Math.max(160, combinedOriginData.length * 34)}>
             <BarChart data={combinedOriginData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={handleCombinedClick} style={{ cursor: 'pointer' }}>
+              style={{ cursor: 'pointer' }}>
               <StripeDefs colors={Object.values(RATING_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
@@ -776,11 +754,11 @@ export default function OverviewTab({ issues, aps }) {
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
               {/* Transparent full-width hit area so the whole row is clickable, even past a thin bar */}
-              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} />
+              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} onClick={handleCombinedBarClick} />
               {RATINGS_ORDER.flatMap(name => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" onClick={handleCombinedBarClick} />,
                 <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
-                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} onClick={handleCombinedBarClick} />,
               ])}
             </BarChart>
           </ResponsiveContainer>
@@ -799,7 +777,7 @@ export default function OverviewTab({ issues, aps }) {
           }>
           <ResponsiveContainer width="100%" height={Math.max(160, riskData.length * 34)}>
             <BarChart data={riskData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={handleRiskClick} style={{ cursor: 'pointer' }}>
+              style={{ cursor: 'pointer' }}>
               <StripeDefs colors={Object.values(RATING_COLORS)} />
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
@@ -807,11 +785,11 @@ export default function OverviewTab({ issues, aps }) {
               <Tooltip contentStyle={tooltipStyle} content={p => <BATooltip {...p} colorMap={RATING_COLORS} />} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }}
                 payload={RATINGS_ORDER.map(name => ({ value: name, type: 'rect', color: RATING_COLORS[name] }))} />
-              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} />
+              <Bar dataKey="_hit" stackId="hit" fill="transparent" legendType="none" isAnimationActive={false} onClick={handleRiskBarClick} />
               {RATINGS_ORDER.flatMap(name => [
-                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" />,
+                <Bar key={`${name}_c`} dataKey={`${name}_c`} stackId="a" fill={RATING_COLORS[name]} legendType="none" onClick={handleRiskBarClick} />,
                 <Bar key={`${name}_p`} dataKey={`${name}_p`} stackId="a" fill={fillFor(RATING_COLORS[name], true)} legendType="none"
-                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} />,
+                  radius={name === 'Low' ? [0, 4, 4, 0] : undefined} onClick={handleRiskBarClick} />,
               ])}
             </BarChart>
           </ResponsiveContainer>
@@ -824,15 +802,15 @@ export default function OverviewTab({ issues, aps }) {
         <ChartCard title="Action Plans by Business Area" subtitle="Click a bar to filter and see items below">
           <ResponsiveContainer width="100%" height={Math.max(200, baAPsData.length * 34)}>
             <BarChart data={baAPsData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
-              onClick={d => handleBAClick(d, 'AP')} style={{ cursor: 'pointer' }}>
+              style={{ cursor: 'pointer' }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: '#6B6B80' }} axisLine={false} tickLine={false} />
               <YAxis {...BAYAxis({ selectedBA })} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="On Track" stackId="a" fill="#007A57" opacity={barOp} />
-              <Bar dataKey="Pending"  stackId="a" fill="#D48000" opacity={barOp} />
-              <Bar dataKey="Late"     stackId="a" fill="#E0002A" radius={[0,4,4,0]} opacity={barOp} />
+              <Bar dataKey="On Track" stackId="a" fill="#007A57" opacity={barOp} onClick={d => handleBABarClick(d, 'AP')} />
+              <Bar dataKey="Pending"  stackId="a" fill="#D48000" opacity={barOp} onClick={d => handleBABarClick(d, 'AP')} />
+              <Bar dataKey="Late"     stackId="a" fill="#E0002A" radius={[0,4,4,0]} opacity={barOp} onClick={d => handleBABarClick(d, 'AP')} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
